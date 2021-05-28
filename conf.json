@@ -1,4 +1,13 @@
 [
-    "long_trade":{"symbol":"BNBBTC"},
-    "smart_trade":{"symbol":"BNBBTC"}
+  { "multiplex_stream": {} },
+  { "user_stream": {} },
+  {
+    "long_strategy": {
+      "symbol": "BNBBUSD",
+      "quantity": "100%"
+    }
+  },
+//  {
+//    "test": {}
+//  }
 ]

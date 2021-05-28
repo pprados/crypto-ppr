@@ -1,0 +1,30 @@
+"""
+Agent pour distribuer les events websocket aux autres agents
+"""
+import asyncio
+from asyncio import sleep
+from typing import Callable, Dict, Any, List, Tuple
+
+from binance import AsyncClient, BinanceSocketManager
+
+_multiplex = set()
+_call_back: List[Callable[[Dict[str, Any], Any], None]] = []
+
+
+def add_multiplex_socket(name: str, cb: Callable[[Dict[str, Any], Any], None]):
+    _multiplex.add(name)
+    _call_back.append(cb)
+
+
+async def agent(client: AsyncClient, name: str, conf: Dict[str, Any]):
+    await sleep(5)  # Time for waiting the initialisation of others agents
+    # and start to listen
+    loop = asyncio.get_running_loop()
+    bm = BinanceSocketManager(client._delegate, user_timeout=60)
+    ms = bm.multiplex_socket(_multiplex)
+    async with ms as mscm:
+        while True:
+            msg = await mscm.recv()
+            #await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
+            for cb in _call_back:
+                await cb(msg['data'])
