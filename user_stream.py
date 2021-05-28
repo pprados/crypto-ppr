@@ -11,6 +11,7 @@ _call_back: List[Callable[[Dict[str, Any], Any], None]] = []
 
 
 def add_user_socket(cb: Callable[[Dict[str, Any], Any], None]):
+    """ La callback doit être rapide et non bloquante """
     _call_back.append(cb)
 
 

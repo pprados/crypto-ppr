@@ -1,6 +1,9 @@
 [
+  // Distribue les events des streams multiplex
   { "multiplex_stream": {} },
+  // Distribue les events du stream user
   { "user_stream": {} },
+  // Une stratégie
   {
     "long_strategy": {
       "symbol": "BNBBUSD",

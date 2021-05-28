@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import sys
 from asyncio import sleep
+from decimal import Decimal
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Dict, Any
@@ -25,8 +27,6 @@ class State(dict):
 async def agent(client: AsyncClient, name: str, conf: Dict[str, Any]) -> None:
     # Récupération du symbol
     symbol = conf["symbol"]
-    # Must be called only at the beginning
-
     path = Path("ctx",name + ".json")
     user_queue = asyncio.Queue()
     market_queue = asyncio.Queue()
@@ -45,11 +45,12 @@ async def agent(client: AsyncClient, name: str, conf: Dict[str, Any]) -> None:
                 ctx = State(json.load(f))
                 logging.info(f"{name}{conf} re-started from snapshot")
         except JSONDecodeError:
-            logging.error(f"Json decode error for {name}. Must resynchronise with API")
-            # TODO: reset depuis le market
+            logging.error(f"Json decode error for {name}. Must resynchronise with others API")
+            ctx.state = "resynchronize"
     else:
         logging.info(f"{name}{conf} started")
 
+    # L'enregistrement des streams ne doit être fait qu'au début du traitement
     # Peux recevoir des messages non demandés
     # Dois rendre la main au plus vite. A vocation à modifier l'état pour laisser l'automate continuer
     # async def event(msg: Dict[str, Any], ctx: Any) -> None:
@@ -62,9 +63,9 @@ async def agent(client: AsyncClient, name: str, conf: Dict[str, Any]) -> None:
     add_user_socket(user_event)
 
     # Clean all new order for symbol
-    for order in await client.get_all_orders(symbol=symbol):
-        if order["status"] == ORDER_STATUS_NEW:
-            await client.cancel_order(symbol=order["symbol"], orderId=order["orderId"])
+    # for order in await client.get_all_orders(symbol=symbol):
+    #     if order["status"] == ORDER_STATUS_NEW:
+    #         await client.cancel_order(symbol=order["symbol"], orderId=order["orderId"])
 
     # List open order
     # open_orders=await client.get_open_orders(symbol='BNBBTC')
@@ -72,18 +73,48 @@ async def agent(client: AsyncClient, name: str, conf: Dict[str, Any]) -> None:
     #     logging.info(f'{name}{conf}: Open order {order["orderId"]}')
 
     await sleep(2) # Attend le démarrage de user_stream
-    info = await client.get_account()
-    for b in info['balances']:
-        print(f'{b["asset"]}:{b["free"]}/{b["locked"]}')
+    # info = await client.get_account()
+    # for b in info['balances']:
+    #     print(f'{b["asset"]}:{b["free"]}/{b["locked"]}')
 
     # Resynchronise l'état sauvegardé
     if ctx.state == "wait_queue":
-        # Si démarre, utilise un pool la première fois
+        # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
+        # Donc, la première fois, on doit utiliser le pooling
         ctx.state = "get_order_status"
 
     # Finite state machine
     while True:
-        if ctx.state == "init":
+        if ctx.state == "resynchronize":
+            # 1. read current order
+            orders = await client.get_all_orders(symbol=symbol,limit=1)
+            # 2. detect if an order with the symbol
+            if False: # orders:
+                ctx.last_order=orders[0]
+                ctx.state = "get_order_status"
+            else:
+                # No trade found. Check if has amount for one of the pair
+                info = await client.get_account()
+                pair = list()
+                total = 0
+                for b in info['balances']:
+                    # print(f'{b["asset"]}:{b["free"]}/{b["locked"]}')
+                    asset = b["asset"]
+                    if asset in symbol:
+                        total += b['free']
+                        pair.append(b)
+                if total:
+                    logging.info("Find asset for pair")
+                    if symbol.startswith(pair[0]['asset']) and pair[0]['free']:
+                        # Membre de gauche avec des coins...
+                        ctx.state = "init"
+                    else:
+                        # Membre de droite avec des coins...
+                        ctx.state = "wait_queue"
+                else:
+                    logging.error(f"Not assets for pair {symbol}")
+                    ctx.state = "error"
+        elif ctx.state == "init":
             current = (await client.get_symbol_ticker(symbol=symbol))["price"]
             quantity = 0.1
             price = current

@@ -12,6 +12,7 @@ _call_back: List[Callable[[Dict[str, Any], Any], None]] = []
 
 
 def add_multiplex_socket(name: str, cb: Callable[[Dict[str, Any], Any], None]):
+    """ La callback doit être rapide et non bloquante """
     _multiplex.add(name)
     _call_back.append(cb)
 

@@ -9,13 +9,8 @@ from binance.enums import HistoricalKlinesType
 from delegate_attribut import custom_inherit
 
 
-class CDecimal(Decimal):
-    def __new__(cls, values) -> Decimal:
-        return Decimal(values[0].rstrip("0") if values is str else values)
-
-
-def to_datetime(binance_str: str):
-    return datetime.fromtimestamp(int(binance_str) / 1000)
+def to_datetime(binance_datetime: str):
+    return datetime.fromtimestamp(int(binance_datetime) / 1000)
 
 
 class TypingSymbolInfo(dict):
@@ -25,25 +20,25 @@ class TypingSymbolInfo(dict):
 
     class _Price_filter(Filter):
         @property
-        def minPrice(self) -> CDecimal:
-            return CDecimal(self._filter["minPrice"])
+        def minPrice(self) -> Decimal:
+            return Decimal(self._filter["minPrice"])
 
         @property
-        def maxPrice(self) -> CDecimal:
-            return CDecimal(self._filter["maxPrice"])
+        def maxPrice(self) -> Decimal:
+            return Decimal(self._filter["maxPrice"])
 
         @property
-        def tickSize(self) -> CDecimal:
-            return CDecimal(self._filter["tickSize"])
+        def tickSize(self) -> Decimal:
+            return Decimal(self._filter["tickSize"])
 
     class _Percent_price_filter(Filter):
         @property
-        def multiplierUp(self) -> CDecimal:
-            return CDecimal(self._filter["multiplierUp"])
+        def multiplierUp(self) -> Decimal:
+            return Decimal(self._filter["multiplierUp"])
 
         @property
-        def multiplierDown(self) -> CDecimal:
-            return CDecimal(self._filter["multiplierDown"])
+        def multiplierDown(self) -> Decimal:
+            return Decimal(self._filter["multiplierDown"])
 
         @property
         def avgPriceMins(self) -> int:
@@ -51,29 +46,29 @@ class TypingSymbolInfo(dict):
 
     class _Lot_size_filter(Filter):
         @property
-        def minQty(self) -> CDecimal:
-            return CDecimal(self._filter["minQty"])
+        def minQty(self) -> Decimal:
+            return Decimal(self._filter["minQty"])
 
         @property
-        def maxQty(self) -> CDecimal:
-            return CDecimal(self._filter["maxQty"])
+        def maxQty(self) -> Decimal:
+            return Decimal(self._filter["maxQty"])
 
         @property
-        def stepSize(self) -> CDecimal:
-            return CDecimal(self._filter["stepSize"])
+        def stepSize(self) -> Decimal:
+            return Decimal(self._filter["stepSize"])
 
     class _Min_notional_filter(Filter):
         @property
-        def minNotional(self) -> CDecimal:
-            return CDecimal(self._filter["minNotional"])
+        def minNotional(self) -> Decimal:
+            return Decimal(self._filter["minNotional"])
 
         @property
         def applyToMarket(self) -> bool:
             return self._filter["applyToMarket"]
 
         @property
-        def avgPriceMins(self) -> CDecimal:
-            return CDecimal(self._filter["avgPriceMins"])
+        def avgPriceMins(self) -> Decimal:
+            return Decimal(self._filter["avgPriceMins"])
 
     class _Iceberg_parts_filter(Filter):
         @property
@@ -82,16 +77,16 @@ class TypingSymbolInfo(dict):
 
     class _Market_lot_size_filter(Filter):
         @property
-        def minQty(self) -> CDecimal:
-            return CDecimal(self._filter["minQty"])
+        def minQty(self) -> Decimal:
+            return Decimal(self._filter["minQty"])
 
         @property
-        def maxQty(self) -> CDecimal:
-            return CDecimal(self._filter["maxQty"])
+        def maxQty(self) -> Decimal:
+            return Decimal(self._filter["maxQty"])
 
         @property
-        def stepSize(self) -> CDecimal:
-            return CDecimal(self._filter["stepSize"])
+        def stepSize(self) -> Decimal:
+            return Decimal(self._filter["stepSize"])
 
     class _Max_num_order_filter(Filter):
         @property
@@ -188,10 +183,12 @@ class TypingSymbolInfo(dict):
 
 
 def _conv_map(keys: List[str], dic: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: v if k not in keys else CDecimal(v) for k, v in dic.items()}
+    return {k: v if k not in keys else Decimal(v) for k, v in dic.items()}
 
 
 # Une delegation du client Binance, pour convertir - à la demande - les str en Decimal
+# et les dates en Date.
+# Cette classe va évoluer au fur et à mesure des besoins.
 @custom_inherit(AsyncClient, delegator='_delegate')
 class TypingClient():
     @classmethod
@@ -219,17 +216,17 @@ class TypingClient():
 
     async def get_klines(self, **params) -> Dict:
         result = await self._delegate.get_klines(**params)
-        return [[CDecimal(x) if isinstance(x, str) else x for x in kline] for kline in result]
+        return [[Decimal(x) if isinstance(x, str) else x for x in kline] for kline in result]
 
     async def get_historical_klines(self, symbol, interval, start_str, end_str=None, limit=500,
                                     klines_type: HistoricalKlinesType = HistoricalKlinesType.SPOT):
         result = await self._delegate.get_historical_klines(symbol, interval, start_str, end_str, limit, klines_type, )
-        return [[CDecimal(x) if isinstance(x, str) else x for x in kline] for kline in result]
+        return [[Decimal(x) if isinstance(x, str) else x for x in kline] for kline in result]
 
     async def get_historical_klines_generator(self, symbol, interval, start_str, end_str=None,
                                               klines_type: HistoricalKlinesType = HistoricalKlinesType.SPOT):
         result = await self._delegate.get_historical_klines_generator(symbol, interval, start_str, end_str, klines_type)
-        return [[CDecimal(x) if isinstance(x, str) else x for x in kline] for kline in result]
+        return [[Decimal(x) if isinstance(x, str) else x for x in kline] for kline in result]
 
     async def get_avg_price(self, **params):
         return _conv_map(['price'], await self._delegate.get_avg_price(**params))
@@ -245,5 +242,5 @@ class TypingClient():
 
     async def get_symbol_ticker(self, **params):
         result = await self._delegate.get_symbol_ticker(**params)
-        result["price"] = CDecimal(result["price"])
+        result["price"] = Decimal(result["price"])
         return result
