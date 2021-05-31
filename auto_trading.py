@@ -1,13 +1,14 @@
 import asyncio
 import logging
 import os
+from asyncio import Queue
 from decimal import *
 from importlib import import_module
-from typing import Union
-
-import jstyleson as json
+from pathlib import Path
+from typing import Union, Dict
 
 from TypingClient import TypingSymbolInfo, TypingClient
+from tools import atomic_load_json
 
 api_key = os.environ["BINANCE_API_KEY"]
 api_secret = os.environ["BINANCE_API_SECRET"]
@@ -59,8 +60,9 @@ async def main():
         client = await TypingClient.create(api_key, api_secret, testnet=test_net)
         # client = Client(api_key, api_secret, testnet=test_net)
 
-        with open("conf.json") as f:
-            conf = json.load(f)
+        conf, rollback = atomic_load_json(Path("conf.json"))
+        if rollback:
+            logging.warning("Use the rollback version of conf.json")
 
         # Création des agents à partir de conf.json.
         # Le nom de l'agent correspond au module à importer. Le code dans etre dans une async fonction agent(...).
@@ -70,6 +72,7 @@ async def main():
         # parametres.
         # Le nom peut se limiter au module, ou etre complet (module or module.ma_fonction)
         agents = []
+        agent_queues:Dict[str,Queue] = {}
         for agent in conf:
             agent_name = list(agent.keys())[0]
             conf = agent[agent_name]
@@ -79,7 +82,8 @@ async def main():
             module_path, fn = fn_name.rsplit(".", 1)
             async_fun = getattr(import_module(module_path), fn)
 
-            agents.append(loop.create_task(async_fun(client, agent_name, conf)))  # Start agent
+            agent_queues[agent_name]=Queue()
+            agents.append(loop.create_task(async_fun(client, agent_name, agent_queues, conf)))  # Start agent
         await asyncio.gather(*agents, return_exceptions=True)  # Lance tous les agents en //
     finally:
         await client.close_connection()

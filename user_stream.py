@@ -2,7 +2,7 @@
 Agent pour distribuer les events websocket aux autres agents
 """
 import asyncio
-from asyncio import sleep
+from asyncio import sleep, Queue
 from typing import Callable, Dict, Any, List, Tuple
 
 from binance import AsyncClient, BinanceSocketManager
@@ -15,7 +15,10 @@ def add_user_socket(cb: Callable[[Dict[str, Any], Any], None]):
     _call_back.append(cb)
 
 
-async def agent(client: AsyncClient, name: str, conf: Dict[str, Any]):
+async def agent(client: AsyncClient,
+                name: str,
+                agent_queues: Dict[str, Queue],
+                conf: Dict[str, Any]):
     await sleep(1)  # Time for waiting the initialisation of others agents
     print(_call_back)
     # and start to listen
