@@ -182,9 +182,12 @@ class TypingSymbolInfo(dict):
         return self["permissions"]
 
 
-def _conv_map(keys: List[str], dic: Dict[str, Any]) -> Dict[str, Any]:
+def _conv_decimal_in_map(keys: List[str], dic: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v if k not in keys else Decimal(v) for k, v in dic.items()}
 
+
+def _conv_symbolinfo(info:Dict[str,Any]) -> Dict[str,Any]:
+    return TypingSymbolInfo(info)
 
 # Une delegation du client Binance, pour convertir - à la demande - les str en Decimal
 # et les dates en Date.
@@ -203,16 +206,16 @@ class TypingClient():
     def __init__(self, delegate: AsyncClient):
         self._delegate = delegate
 
-    async def get_symbol_info(self, symbol: str) -> TypingSymbolInfo:
-        return TypingSymbolInfo(await self._delegate.get_symbol_info(symbol))
+    async def get_symbol_info(self, symbol: str) -> Dict[str,Any]:
+        return _conv_symbolinfo(await self._delegate.get_symbol_info(symbol))
 
     async def get_recent_trades(self, **params) -> List[Dict[str, Any]]:
         result = await self._delegate.get_recent_trades(**params)
-        return [_conv_map(['price', 'qty'], x) for x in result]
+        return [_conv_decimal_in_map(['price', 'qty'], x) for x in result]
 
     async def get_aggregate_trades(self, **params) -> List[Dict[str, Any]]:
         result = await self._delegate.get_aggregate_trades(**params)
-        return [_conv_map(['p', 'q'], x) for x in result]
+        return [_conv_decimal_in_map(['p', 'q'], x) for x in result]
 
     async def get_klines(self, **params) -> Dict:
         result = await self._delegate.get_klines(**params)
@@ -229,16 +232,16 @@ class TypingClient():
         return [[Decimal(x) if isinstance(x, str) else x for x in kline] for kline in result]
 
     async def get_avg_price(self, **params):
-        return _conv_map(['price'], await self._delegate.get_avg_price(**params))
+        return _conv_decimal_in_map(['price'], await self._delegate.get_avg_price(**params))
 
     async def get_account(self, **params):
         result = await self._delegate.get_account(**params)
         if result:
-            result["balances"] = [_conv_map(["free", "locked"], x) for x in result["balances"]]
+            result["balances"] = [_conv_decimal_in_map(["free", "locked"], x) for x in result["balances"]]
         return result
 
     async def get_asset_balance(self, asset, **params):
-        return _conv_map(["free", "locked"], await self._delegate.get_asset_balance(asset=asset, **params))
+        return _conv_decimal_in_map(["free", "locked"], await self._delegate.get_asset_balance(asset=asset, **params))
 
     async def get_symbol_ticker(self, **params):
         result = await self._delegate.get_symbol_ticker(**params)

@@ -1,3 +1,8 @@
+"""
+Génerateur en charge de la création d'un ordre et de son application.
+Le générateur retour le context qu'il faut sauver pour lui dans l'agent.
+L'état order_ctx.state fini par etre STATE_ERROR ou STATE_ORDER_FILLED.
+"""
 import logging
 from asyncio import sleep, Queue
 from typing import AsyncGenerator, Tuple, Dict, Any

@@ -1,15 +1,16 @@
 import asyncio
 import sys
 import traceback
+from asyncio import QueueEmpty
+from decimal import Decimal
 from pathlib import Path
-from typing import Dict, Any
 
 from binance import AsyncClient
-from binance.enums import SIDE_BUY, ORDER_TYPE_MARKET
+from binance.enums import SIDE_BUY, ORDER_TYPE_LIMIT, TIME_IN_FORCE_GTC
 
 # Mémorise l'état de l'automate, pour permettre une reprise à froid
 from filled_order import *
-from tools import atomic_load_json, atomic_save_json, generate_order_id
+from tools import atomic_load_json, generate_order_id, wait_queue_init, check_order, update_order
 from user_stream import add_user_socket
 
 # TODO: a voir dans streams
@@ -42,13 +43,14 @@ async def agent(client: AsyncClient,
         # Récupération du symbol
         symbol = conf["symbol"]
         path = Path("ctx", agent_name + ".json")
+        symbol_info = await client.get_symbol_info(symbol)
 
         input_queue = agent_queues[agent_name]  # Queue to receive msg for user or other agent
-        user_queue = asyncio.Queue()  # Queue to receive event from user account
         market_queue = asyncio.Queue()  # Queue to receive event from market
 
         def save_state():
-            atomic_save_json(ctx, path)
+            # FIXME atomic_save_json(ctx, path)
+            pass
 
         # Conf par défaut
         ctx = Ctx(
@@ -61,7 +63,7 @@ async def agent(client: AsyncClient,
         if path.exists():
             obj, rollback = atomic_load_json(path)
             ctx = Ctx(obj)
-            if rollback:  # TODO:
+            if rollback:  # TODO: impossible de lire de context de l'agent
                 ctx.previous_state = ctx.state
                 ctx.state = "resynchronize"
         else:
@@ -75,6 +77,7 @@ async def agent(client: AsyncClient,
         # add_multiplex_socket(symbol.lower()+"@ticker", event)
 
         # Ajout une queue pour attendre les évènements de l'utilisateur en websocket
+        user_queue = asyncio.Queue()  # Queue to receive event from user account
         add_user_socket(lambda msg: user_queue.put_nowait(msg))
 
         # Clean all new order for symbol
@@ -88,14 +91,7 @@ async def agent(client: AsyncClient,
         #     logging.info(f'{name}{conf}: Open order {order["orderId"]}')
 
         # Attend le démarrage des queues user et multiplex
-        user_queue_initilized = False
-        multiplex_queue_initilized = False
-        while not user_queue_initilized or not multiplex_queue_initilized:
-            msg = await input_queue.get()
-            if msg["from"] == "user_stream" and msg["msg"]=="initialized":
-                user_queue_initilized = True
-            if msg["from"] == "multiplex_stream" and msg["msg"]=="initialized":
-                multiplex_queue_initilized = True
+        await wait_queue_init(input_queue)
 
         # info = await client.get_account()
         # for b in info['balances']:
@@ -103,33 +99,42 @@ async def agent(client: AsyncClient,
 
         # Reprise du generateur order
         if 'order_ctx' in ctx:
-            current_order = await restart_order_generator(client, agent_name + "-order", ctx.order_ctx)
+            current_order = await restart_order_generator(client, agent_name + "-order", user_queue, ctx.order_ctx)
 
         # Finite state machine
         while True:
+            try:
+                msg = input_queue.get_nowait()
+            except QueueEmpty:
+                pass  # Ignore
             if ctx.state == STATE_INIT:
                 ctx.state = STATE_ADD_ORDER
                 save_state()
             elif ctx.state == STATE_ADD_ORDER:
-                current = (await client.get_symbol_ticker(symbol=symbol))["price"]
-                quantity = 0.1
-                price = current
+                current_price = (await client.get_symbol_ticker(symbol=symbol))["price"]
+                quantity = Decimal(0.1)
+                price = current_price / 2
+
+                order = {
+                    "newClientOrderId": generate_order_id(agent_name),
+                    "symbol": symbol,
+                    "side": SIDE_BUY,
+                    "quantity": quantity,
+                    # "type": ORDER_TYPE_MARKET,
+                    "type": ORDER_TYPE_LIMIT,
+                    "timeInForce": TIME_IN_FORCE_GTC,
+                    "price": price
+                }
+                order = update_order(symbol_info, current_price, order)
+                check_order(symbol_info, current_price, order['price'], order['quantity'])
+                order = await client.create_test_order(**order)
+
                 # FIXME current_order = order_generator(client, agent_name+"-order", ctx.order_state)
-                current_order,ctx.order_ctx = await create_order_generator(
+                current_order, ctx.order_ctx = await create_order_generator(
                     client,
                     agent_name + "-order",
                     user_queue,
-                    {
-                        "symbol": symbol,
-                        "side": SIDE_BUY,
-                        "quantity": quantity,
-                        "type": ORDER_TYPE_MARKET,
-                        "newClientOrderId": generate_order_id(agent_name),
-                        # type=ORDER_TYPE_LIMIT,
-                        # timeInForce=TIME_IN_FORCE_GTC,
-                        # price=price
-
-                    }
+                    order
                 )
                 ctx.state = STATE_WAIT_ORDER_FILLED
                 save_state()
