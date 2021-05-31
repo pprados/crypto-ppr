@@ -16,6 +16,7 @@ def add_user_socket(cb: Callable[[Dict[str, Any], Any], None]):
 
 
 async def agent(client: AsyncClient,
+                client_account:Dict[str,Any],
                 name: str,
                 agent_queues: Dict[str, Queue],
                 conf: Dict[str, Any]):

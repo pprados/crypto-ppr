@@ -8,7 +8,9 @@
   {
     "long_strategy": {
       "symbol": "BNBBUSD",
-      "quantity": "100%"
+      "quote_quantity": "0.1%",
+      "lower": "30%",
+      "upper": "2%"
     }
   }
 ]

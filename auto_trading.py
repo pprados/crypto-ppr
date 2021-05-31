@@ -2,12 +2,11 @@ import asyncio
 import logging
 import os
 from asyncio import Queue
-from decimal import *
 from importlib import import_module
 from pathlib import Path
-from typing import Union, Dict
+from typing import Dict
 
-from TypingClient import TypingSymbolInfo, TypingClient
+from TypingClient import TypingClient
 from tools import atomic_load_json
 
 api_key = os.environ["BINANCE_API_KEY"]
@@ -35,7 +34,13 @@ async def main():
         # parametres.
         # Le nom peut se limiter au module, ou etre complet (module or module.ma_fonction)
         agents = []
-        agent_queues:Dict[str,Queue] = {}
+        agent_queues: Dict[str, Queue] = {}
+
+        # Les infos du comptes, pour savoir ce qui est gardé par les agents
+        client_account = await client.get_account()
+        # Agent la balance par defaut pour les agents. FIXME: Glups, s'il y a des ordres en cours...
+        for balance in client_account['balances']:
+            balance['agent_free'] = balance['free']
 
         for agent in conf:
             agent_name = list(agent.keys())[0]
@@ -46,8 +51,8 @@ async def main():
             module_path, fn = fn_name.rsplit(".", 1)
             async_fun = getattr(import_module(module_path), fn)
 
-            agent_queues[agent_name]=Queue()
-            agents.append(loop.create_task(async_fun(client, agent_name, agent_queues, conf)))
+            agent_queues[agent_name] = Queue()
+            agents.append(loop.create_task(async_fun(client, client_account, agent_name, agent_queues, conf)))
 
         await asyncio.gather(*agents, return_exceptions=True)  # Lance tous les agents en //
     finally:

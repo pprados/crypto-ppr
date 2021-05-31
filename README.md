@@ -1,3 +1,5 @@
+Tuto: https://algotrading101.com/learn/binance-python-api-guide/
+
 Ce projet perso, cherche à permettre le trading automatique.
 Avec un processus qui tourne sur un raspberry ou un docker, il faut pouvoir 
 executer des statégies variées, codées en Python.
