@@ -3,7 +3,7 @@ Agent pour distribuer les events websocket aux autres agents
 """
 import asyncio
 from asyncio import sleep, Queue
-from typing import Callable, Dict, Any, List, Tuple
+from typing import Callable, Dict, Any, List
 
 from binance import AsyncClient, BinanceSocketManager
 
@@ -20,14 +20,24 @@ async def agent(client: AsyncClient,
                 agent_queues: Dict[str, Queue],
                 conf: Dict[str, Any]):
     await sleep(1)  # Time for waiting the initialisation of others agents
-    print(_call_back)
     # and start to listen
     loop = asyncio.get_running_loop()
     bm = BinanceSocketManager(client._delegate, user_timeout=60)
     ms = bm.user_socket()
+    start = True
     async with ms as mscm:
         while True:
+            if start:
+                # Signale a tous les autres agents, que la queue user est démarrée
+                for agent in agent_queues.values():
+                    agent.put_nowait(
+                        {
+                            "from": name,
+                            "msg": "initialized"
+
+                        })
+                start = False
             msg = await mscm.recv()
-            #await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
+            # await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
             for cb in _call_back:
                 await cb(msg)

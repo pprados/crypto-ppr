@@ -73,6 +73,7 @@ async def main():
         # Le nom peut se limiter au module, ou etre complet (module or module.ma_fonction)
         agents = []
         agent_queues:Dict[str,Queue] = {}
+
         for agent in conf:
             agent_name = list(agent.keys())[0]
             conf = agent[agent_name]
@@ -83,7 +84,8 @@ async def main():
             async_fun = getattr(import_module(module_path), fn)
 
             agent_queues[agent_name]=Queue()
-            agents.append(loop.create_task(async_fun(client, agent_name, agent_queues, conf)))  # Start agent
+            agents.append(loop.create_task(async_fun(client, agent_name, agent_queues, conf)))
+
         await asyncio.gather(*agents, return_exceptions=True)  # Lance tous les agents en //
     finally:
         await client.close_connection()

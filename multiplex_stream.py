@@ -26,8 +26,19 @@ async def agent(client: AsyncClient,
     loop = asyncio.get_running_loop()
     bm = BinanceSocketManager(client._delegate, user_timeout=60)
     ms = bm.multiplex_socket(_multiplex)
+    start = True
     async with ms as mscm:
         while True:
+            if start:
+                # Signale a tous les autres agents, que la queue user est démarrée
+                for agent in agent_queues.values():
+                    agent.put_nowait(
+                        {
+                            "from": name,
+                            "msg": "initialized"
+
+                        })
+                start = False
             msg = await mscm.recv()
             #await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
             for cb in _call_back:
