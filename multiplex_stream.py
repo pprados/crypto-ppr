@@ -2,6 +2,7 @@
 Agent pour distribuer les events websocket aux autres agents
 """
 import asyncio
+import logging
 from asyncio import sleep, Queue
 from typing import Callable, Dict, Any, List, Tuple
 
@@ -17,30 +18,44 @@ def add_multiplex_socket(name: str, cb: Callable[[Dict[str, Any], Any], None]):
     _call_back.append(cb)
 
 
-async def agent(client: AsyncClient,
-                client_account:Dict[str,Any],
-                name: str,
-                agent_queues: Dict[str, Queue],
-                conf: Dict[str, Any]):
+async def bot(client: AsyncClient,
+              client_account:Dict[str,Any],
+              bot_name: str,
+              agent_queues: Dict[str, Queue],
+              conf: Dict[str, Any]):
+    log=logging.getLogger(bot_name)
     await sleep(5)  # Time for waiting the initialisation of others agents
     # and start to listen
     loop = asyncio.get_running_loop()
     bm = BinanceSocketManager(client._delegate, user_timeout=60)
     ms = bm.multiplex_socket(_multiplex)
-    start = True
-    async with ms as mscm:
-        while True:
-            if start:
-                # Signale a tous les autres agents, que la queue user est démarrée
-                for agent in agent_queues.values():
-                    agent.put_nowait(
-                        {
-                            "from": name,
-                            "msg": "initialized"
+    class ReconnectHandle():
+        def cancel(self):
+            print("cancel")
 
-                        })
-                start = False
-            msg = await mscm.recv()
-            #await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
-            for cb in _call_back:
-                await cb(msg['data'])
+    ms.reconnect_handle = ReconnectHandle()
+    ms.MIN_RECONNECT_WAIT=1.0
+    ms.MAX_RECONNECTS=100
+
+    start = True
+    try:
+        async with ms as mscm:
+            while True:
+                if start:
+                    # Signale a tous les autres agents, que la queue user est démarrée
+                    for agent in agent_queues.values():
+                        agent.put_nowait(
+                            {
+                                "from": bot_name,
+                                "msg": "initialized"
+
+                            })
+                    start = False
+                msg = await mscm.recv()
+                #await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
+                for cb in _call_back:
+                    assert msg
+                    assert cb
+                    await cb(msg['data'])
+    except Exception as ex:  # FIXME
+        log.exception(ex)

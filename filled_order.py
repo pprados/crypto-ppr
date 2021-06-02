@@ -3,10 +3,13 @@ Génerateur en charge de la création d'un ordre et de son application.
 Le générateur retour le context qu'il faut sauver pour lui dans l'agent.
 L'état order_ctx.state fini par etre STATE_ERROR ou STATE_ORDER_FILLED.
 """
+import asyncio
 import logging
-from asyncio import sleep, Queue
+from asyncio import sleep, Queue, wait_for
+from queue import Empty
 from typing import AsyncGenerator, Tuple, Dict, Any
 
+from binance import AsyncClient
 from binance.enums import ORDER_STATUS_FILLED, ORDER_STATUS_NEW
 
 # Mémorise l'état de l'automate, pour permettre une reprise à froid
@@ -17,6 +20,7 @@ from binance.enums import ORDER_STATUS_FILLED, ORDER_STATUS_NEW
 #     MIN_RECONNECT_WAIT = 0.1
 #     TIMEOUT = 10
 #     NO_MESSAGE_RECONNECT_TIMEOUT = 60
+from conf import STREAM_MSG_TIMEOUT
 
 POOLING_SLEEP = 2
 
@@ -37,25 +41,34 @@ class Order_Ctx(dict):
 
 
 # FIXME: user_queue ne peux pas être partagés avec plusieurs orders
-async def create_order_generator(client, agent_name: str, user_queue: Queue, pre_order) -> \
+async def create_order_generator(client:AsyncClient,
+                                 user_queue: Queue,
+                                 log:logging,
+                                 pre_order:Dict[str,Any]) -> \
         Tuple[AsyncGenerator[Dict[str, Any], None], Dict[str, Any]]:
     ctx = Order_Ctx(
         {
             "state": STATE_INIT,
             "pre_order": pre_order
         })
-    current_order = order_generator(client, agent_name + "-order", user_queue, ctx)
+    current_order = order_generator(client, user_queue, log, ctx)
     ctx = await current_order.asend(None)
     return current_order, ctx
 
 
-async def restart_order_generator(client, agent_name: str, user_queue: Queue, context):
-    current_order = order_generator(client, agent_name + "-order", user_queue, Order_Ctx(context))
+async def restart_order_generator(client:AsyncClient,
+                                  user_queue: Queue,
+                                  log:logging,
+                                  ctx:Dict[str,Any]):
+    current_order = order_generator(client, user_queue, log, Order_Ctx(ctx))
     await current_order.asend(None)
     return current_order
 
 
-async def order_generator(client, agent_name: str, user_queue: Queue, ctx):
+async def order_generator(client,
+                          user_queue: Queue,
+                          log:logging,
+                          ctx:Dict[str,Any]):
     # Resynchronise l'état sauvegardé
     if ctx.state in (STATE_ORDER_CONFIRMED, STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET):
         # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
@@ -64,6 +77,9 @@ async def order_generator(client, agent_name: str, user_queue: Queue, ctx):
     yield ctx
     symbol = ctx.pre_order['symbol']
 
+    def _get_user_msg():
+        return user_queue.get()
+
     if ctx.state in (STATE_ORDER_CONFIRMED, STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET):
         # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
         # Donc, la première fois, on doit utiliser le pooling
@@ -71,6 +87,7 @@ async def order_generator(client, agent_name: str, user_queue: Queue, ctx):
 
     # Finite state machine
     while True:
+        log.debug(f"filled_order=> {ctx.state}")
         if ctx.state == STATE_INIT:
             ctx.state = STATE_ADD_ORDER
         elif ctx.state == STATE_ADD_ORDER:
@@ -78,11 +95,12 @@ async def order_generator(client, agent_name: str, user_queue: Queue, ctx):
             ctx.state = STATE_WAIT_ORDER
             yield ctx
 
+            # TODO: test l'ordre pour vérifier que le solde est bon.
             # Puis essaye de l'executer
             order = await client.create_order(**ctx.pre_order)
 
             # C'est bon, il est passé
-            logging.info(f'{agent_name}{ctx}: order {order["clientOrderId"]} created')
+            log.info(f'Order {order["clientOrderId"]} created')
             ctx.last_order = order
             ctx.state = STATE_ORDER_CONFIRMED
             yield ctx
@@ -95,14 +113,14 @@ async def order_generator(client, agent_name: str, user_queue: Queue, ctx):
                 filter(lambda x: x.get("newClientOrderId", "") == ctx.pre_order["newClientOrderId"], orders))
             if not pending_order:
                 # Finalement, l'ordre n'est pas passé, on le relance
-                logging.info(f'{agent_name}{ctx}: Resend order {ctx.pre_order["newClientOrderId"]}...')
+                log.info(f'Resend order {ctx.pre_order["newClientOrderId"]}...')
                 order = await client.create_order(**ctx.pre_order)
-                logging.info(f'{agent_name}{ctx}: Order {order["clientOrderId"]} created')
+                log.info(f'Order {order["clientOrderId"]} created')
                 ctx.last_order = order
             else:
                 # Il est passé, donc on reprend de là.
                 ctx.last_order = pending_order[0]
-                logging.info(f'{agent_name}{ctx}: Recover order {order["clientOrderId"]}')
+                log.info(f'Recover order {order["clientOrderId"]}')
             ctx.state = STATE_ORDER_CONFIRMED
             yield ctx
 
@@ -112,39 +130,49 @@ async def order_generator(client, agent_name: str, user_queue: Queue, ctx):
 
         elif ctx.state == STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET:
             # Attend en websocket
-            msg = await user_queue.get()
-            # See https://github.com/binance/binance-spot-api-docs/blob/master/user-data-stream.md
-            if msg['e'] == "error":
-                # Web socket in error
+            try:
+
+                log.debug("Wait event order status...")
+                msg = await wait_for(_get_user_msg() , timeout=STREAM_MSG_TIMEOUT)
+                # See https://github.com/binance/binance-spot-api-docs/blob/master/user-data-stream.md
+                if msg['e'] == "error":
+                    # Web socket in error
+                    ctx.state = STATE_WAIT_ORDER_FILLED_WITH_POLLING
+                    yield ctx
+                elif msg['e'] == "executionReport" and \
+                        msg['s'] == symbol and \
+                        msg['i'] == ctx['last_order']['orderId'] and \
+                        msg['X'] != ORDER_STATUS_NEW:
+                    ctx.state = STATE_ORDER_FILLED
+                    yield ctx
+                    log.info("Receive event for order")
+                user_queue.task_done()
+            except (asyncio.TimeoutError,Empty) as ex:
+                # Periodiquement, essaye en polling
                 ctx.state = STATE_WAIT_ORDER_FILLED_WITH_POLLING
                 yield ctx
-            elif msg['e'] == "executionReport" and \
-                    msg['s'] == symbol and \
-                    msg['i'] == ctx['last_order']['orderId'] and \
-                    msg['X'] != ORDER_STATUS_NEW:
-                ctx.state = STATE_ORDER_FILLED
-                yield ctx
-                logging.info("Receive event for order")
-            user_queue.task_done()
         elif ctx.state == STATE_WAIT_ORDER_FILLED_WITH_POLLING:
+            log.debug("Polling get order status...")
             order = await client.get_order(symbol=ctx['last_order']['symbol'],
                                            orderId=ctx['last_order']['orderId'])
             if order['status'] == ORDER_STATUS_FILLED:
-                logging.info(f'{agent_name}{ctx}: order {order["orderId"]} filled')
+                log.info(f'Order {order["orderId"]} filled')
                 ctx.state = STATE_ORDER_FILLED
                 yield ctx
             elif order['status'] != ORDER_STATUS_NEW:
-                logging.error(f'{agent_name}{ctx}: order {order["orderId"]} in error')
+                log.error(f'Order {order["orderId"]} in error')
                 ctx.state = STATE_ERROR
                 yield ctx
             else:
-                await sleep(POOLING_SLEEP)
+                ctx.state = STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
+                yield ctx
+                # await sleep(POOLING_SLEEP)
         elif ctx.state == STATE_ORDER_FILLED:
             pass
         elif ctx.state == STATE_ERROR:
             pass  # FIXME
         else:
-            logging.error(f'{agent_name}{ctx}: Unknown state \'{ctx["state"]}\'')
+            log.error(f'Unknown state \'{ctx["state"]}\'')
             ctx.state = STATE_ERROR
             yield ctx
             return

@@ -4,7 +4,9 @@ from binance import AsyncClient, BinanceSocketManager
 from binance.helpers import round_step_size
 
 
-async def agent(client: AsyncClient, name: str, conf: Dict[str, Any]) -> None:
+async def bot(client: AsyncClient,
+              name: str,
+              conf: Dict[str, Any]) -> None:
     symbol = 'BNBBTC'
     amount = 0.000234234
     precision = 5

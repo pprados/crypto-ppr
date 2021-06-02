@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from asyncio import Queue
 from decimal import Decimal
@@ -27,11 +28,13 @@ def atomic_save_json(obj: Any, filename: Path) -> None:
     new_filename = filename.parent / (filename.name + ".new")
     old_filename = filename.parent / (filename.name + ".old")
     with open(new_filename, "w") as f:
-        json.dump(obj, f, default=_serialize)
+        json.dump(obj, f, default=_serialize,indent=2)
+    os.sync()
     if filename.exists():
         filename.rename(old_filename)
     new_filename.rename(filename)
     old_filename.unlink(missing_ok=True)
+    os.sync()
 
 
 def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
@@ -42,17 +45,26 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
         # Try to load the new filename
         try:
             with open(new_filename) as f:
-                obj = json.load(f)
+                obj = json.load(f) # Try to parse
             filename.unlink(missing_ok=True)
             old_filename.unlink(missing_ok=True)
             new_filename.rename(filename)
+            os.sync()
             return obj, False
         except JSONDecodeError as e:
             # new filename is dirty
             new_filename.unlink()
-            if old_filename.exists():
-                old_filename.rename(filename)
+            filename.unlink(missing_ok=True)
+            old_filename.rename(filename)
+            os.sync()
             rollback = True
+    if old_filename.exists():
+        # Cela a crashé lors d'un JSONDecodeError, pendant qu'on resoud l'état.
+        filename.unlink(missing_ok=True)
+        old_filename.rename(filename)
+        os.sync()
+        rollback = True
+
     with open(filename) as f:
         return json.load(f), rollback
 
