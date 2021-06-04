@@ -60,6 +60,20 @@ class AddOrder(BotGenerator):
         return self
 
 
+    def is_filled(self):
+        return self.state == AddOrder.STATE_ORDER_FILLED
+
+    # FIXME
+    # def is_partially_filled(self):
+    #     return self.state == AddOrder.STATE_ORDER_FILLED
+
+    def is_error(self):
+        return self.state == AddOrder.STATE_ERROR
+
+    def cancel(self):
+        self.previous_state = self.state
+        self.state = "Cancel"
+
     async def generator(self,
                         client,
                         user_queue: Queue,

@@ -25,7 +25,7 @@ from binance.exceptions import BinanceAPIException
 from binance.helpers import *
 
 from conf import MIN_RECONNECT_WAIT
-from filled_order import *
+from add_order import *
 from multiplex_stream import add_multiplex_socket
 from tools import atomic_load_json, generate_order_id, wait_queue_init, update_order, split_symbol, \
     atomic_save_json, check_order, log_order, update_wallet, json_order, log_add_order, to_usdt
@@ -250,14 +250,14 @@ class WinterSummerBot(BotGenerator):
                     ctx.state = WinterSummerBot.STATE_WAIT_ALIGN_WINTER_ORDER_FILLED
                     yield self
                 elif ctx.state == WinterSummerBot.STATE_WAIT_ALIGN_WINTER_ORDER_FILLED:
-                    order_state = await ctx.winter_order.next()
-                    if order_state == AddOrder.STATE_ORDER_FILLED:
+                    await ctx.winter_order.next()
+                    if ctx.winter_order.is_filled():
                         del ctx.winter_order
                         ctx.state = WinterSummerBot.STATE_WINTER_ORDER
                         log.info(f"{ctx.wallet=}")
                         log.info("Wait the summer...")
                         yield self
-                    elif order_state == AddOrder.STATE_ERROR:
+                    elif ctx.winter_order.is_error():
                         # FIXME
                         ctx.state == WinterSummerBot.STATE_ERROR
                         yield self
@@ -287,7 +287,7 @@ class WinterSummerBot(BotGenerator):
                     yield self
                 elif ctx.state == WinterSummerBot.STATE_WAIT_ALIGN_SUMMER_ORDER_FILLED:
                     order_state = await ctx.summer_order.next()
-                    if order_state == AddOrder.STATE_ORDER_FILLED:
+                    if ctx.summer_order.is_filled():
                         ctx.wallet = update_wallet(ctx.wallet, ctx.summer_order.order)
                         log_order(log, ctx.summer_order.order)
                         del ctx.summer_order
@@ -296,7 +296,7 @@ class WinterSummerBot(BotGenerator):
                         log.info(
                             f"Wait the winters... ({ctx.wallet[base]:f} {base} / {ctx.wallet[quote]:f} {quote})")
                         yield self
-                    elif order_state == AddOrder.STATE_ERROR:
+                    elif ctx.summer_order.is_error():
                         # FIXME
                         ctx.state == WinterSummerBot.STATE_ERROR
                         yield self
@@ -346,8 +346,8 @@ class WinterSummerBot(BotGenerator):
 
 
                 elif ctx.state == WinterSummerBot.STATE_WAIT_WINTER_ORDER_FILLED:
-                    order_state = await ctx.winter_order.next()
-                    if order_state == AddOrder.STATE_ORDER_FILLED:
+                    await ctx.winter_order.next()
+                    if ctx.winter_order.is_filled():
                         ctx.wallet = update_wallet(ctx.wallet, ctx.winter_order.order)
                         del ctx.winter_order
                         ctx.state = WinterSummerBot.STATE_WAIT_SUMMER
@@ -355,7 +355,7 @@ class WinterSummerBot(BotGenerator):
                         log.info("Wait the summer...")
                         yield self
                     # TODO: si ordre expirer, le relancer
-                    elif order_state == AddOrder.STATE_ERROR:
+                    elif ctx.winter_order.is_error():
                         # FIXME
                         ctx.state == WinterSummerBot.STATE_ERROR
                         yield self
@@ -389,8 +389,8 @@ class WinterSummerBot(BotGenerator):
                     yield self
 
                 elif ctx.state == WinterSummerBot.STATE_WAIT_SUMMER_ORDER_FILLED:
-                    order_state = await ctx.summer_order.next()
-                    if order_state == AddOrder.STATE_ORDER_FILLED:
+                    await ctx.summer_order.next()
+                    if ctx.summer_order.is_filled():
                         ctx.wallet = update_wallet(ctx.wallet, ctx.summer_order.order)
                         sell_quantity_quote = Decimal(ctx.summer_order.order['executedQty'])
                         sell_price_quote = Decimal(ctx.summer_order.order['price'])
@@ -400,7 +400,7 @@ class WinterSummerBot(BotGenerator):
                         ctx.state = WinterSummerBot.STATE_WINTER_ORDER
                         log.info("Wait the winter...")
                         yield self
-                    elif order_state == AddOrder.STATE_ERROR:
+                    elif ctx.summer_order.is_error():
                         # FIXME
                         ctx.state == WinterSummerBot.STATE_ERROR
                         yield self
