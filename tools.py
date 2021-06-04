@@ -9,6 +9,7 @@ from random import randint
 from typing import Any, Tuple, Dict
 
 import jstyleson as json
+from binance import AsyncClient
 from binance.enums import ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET, SIDE_BUY
 
 
@@ -44,22 +45,37 @@ def _serialize(obj):
             s = s + ".0"
         return s.rstrip('0')
 
+    # Detecte les generators pour ne pas les sauvers
+    if hasattr(obj,'ag_frame'):
+        return '_generator'
     return obj.__dict__
 
 
 def json_dumps(obj: Any) -> str:
-    return json.dumps(obj, indent=2, default=_serialize)
+    return json.dumps(obj, indent=2,
+                      skipkeys=True,
+                      default=_serialize)
 
 
+def json_loads(tx) -> Dict[str,Any]:
+    return json.loads(tx,
+                      parse_float=Decimal,
+                      )
+class Toto():
+    def __init_(self,*args,**kwargs):
+        pass
 def json_order(order: Dict[str, Any]) -> Dict[str, Any]:
-    return json.loads(json_dumps(order))
+    return json_loads(json_dumps(order))
 
 
 def atomic_save_json(obj: Any, filename: Path) -> None:
     new_filename = filename.parent / (filename.name + ".new")
     old_filename = filename.parent / (filename.name + ".old")
     with open(new_filename, "w") as f:
-        json.dump(obj, f, default=_serialize, indent=2)
+        json.dump(obj, f,
+                  default=_serialize,
+                  skipkeys=True,
+                  indent=2)
     os.sync()
     if filename.exists():
         filename.rename(old_filename)
@@ -76,7 +92,10 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
         # Try to load the new filename
         try:
             with open(new_filename) as f:
-                obj = json.load(f)  # Try to parse
+                obj = json.load(
+                    f,
+                    parse_float=Decimal,
+                )  # Try to parse
             filename.unlink(missing_ok=True)
             old_filename.unlink(missing_ok=True)
             new_filename.rename(filename)
@@ -85,8 +104,8 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
         except JSONDecodeError as e:
             # new filename is dirty
             new_filename.unlink()
-            filename.unlink(missing_ok=True)
-            old_filename.rename(filename)
+            if old_filename.exists():
+                old_filename.rename(filename)
             os.sync()
             rollback = True
     if old_filename.exists():
@@ -97,7 +116,9 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
         rollback = True
 
     with open(filename) as f:
-        return json.load(f), rollback
+        return json.load(f,
+                         parse_float=Decimal
+                         ), rollback
 
 
 def generate_order_id(agent_name: str):
@@ -236,6 +257,20 @@ def check_order(wsi: Dict[str, Any], current_price: Decimal, order) -> bool:
 def split_symbol(symbol: str) -> Tuple[str, str]:
     m = re.match(r'(\w+)((USDT)|(ETH)|(BTC)|(USDT))$', symbol)
     return m.group(1), m.group(2)
+
+async def to_usdt(client:AsyncClient,asset:str,val:Decimal) -> Decimal:
+    if not val:
+        return Decimal(0)
+    if asset == "USDT":
+        return val
+    if asset == "ETH":
+        return ((await client.get_symbol_ticker(symbol="ETHUSDT"))["price"] * val)
+    if asset == "BTC":
+        return ((await client.get_symbol_ticker(symbol="BTCUSDT"))["price"] * val)
+    if asset in ["BIDR","BRL","BVND","DAI","IDRT","NGN","RUB","TRY","UAH"]: # FIXME: a tester. Inversion de la conv ?
+        return (await client.get_symbol_ticker(symbol="USDT"+asset))["price"]
+    return ((await client.get_symbol_ticker(symbol=asset+"USDT"))["price"] * val)
+
 
 
 def _dump_order(log: logging, order: Dict[str, Any], prefix: str, suffix: str = ''):

@@ -15,7 +15,7 @@ Parametres:
 """
 import sys
 import traceback
-from asyncio import QueueEmpty
+from asyncio import QueueEmpty, sleep
 from decimal import Decimal
 from pathlib import Path
 
@@ -30,7 +30,7 @@ from conf import MIN_RECONNECT_WAIT
 from filled_order import *
 from multiplex_stream import add_multiplex_socket
 from tools import atomic_load_json, generate_order_id, wait_queue_init, update_order, split_symbol, \
-    atomic_save_json, check_order, log_order, update_wallet, json_order, log_add_order
+    atomic_save_json, check_order, log_order, update_wallet, json_order, log_add_order, to_usdt
 from user_stream import add_user_socket
 
 # TODO: a voir dans streams
@@ -52,27 +52,19 @@ STATE_WAIT_WINTER_ORDER_FILLED = "wait_winter_order_filled"
 STATE_WAIT_SUMMER = "wait_summer"
 STATE_WAIT_SUMMER_ORDER_FILLED = "wait_summer_order_filled"
 
+STATE_ERROR = "error"
+
 def dstr(d:Decimal):
     return format(d,"f")
-
-async def to_usdt(client:AsyncClient,asset:str,val:Decimal) -> Decimal:
-    if not val:
-        return Decimal(0)
-    if asset == "USDT":
-        return val
-    if asset == "ETH":
-        return ((await client.get_symbol_ticker(symbol="ETHUSDT"))["price"] * val)
-    if asset == "BTC":
-        return ((await client.get_symbol_ticker(symbol="BTCUSDT"))["price"] * val)
-    if asset in ["BIDR","BRL","BVND","DAI","IDRT","NGN","RUB","TRY","UAH"]: # FIXME: a tester. Inversion de la conv ?
-        return (await client.get_symbol_ticker(symbol="USDT"+asset))["price"]
-    return ((await client.get_symbol_ticker(symbol=asset+"USDT"))["price"] * val)
 
 class Ctx(dict):
     def __init__(self, *args, **kwargs):
         super(Ctx, self).__init__(*args, **kwargs)
         self.__dict__ = self
 
+
+# Utilisation d'un wallet pour le bot.
+# Il sert à maintenir le stock stradable.
 
 async def bot(client: AsyncClient,
               socket_manager: BinanceSocketManager,
@@ -85,13 +77,14 @@ async def bot(client: AsyncClient,
     wait_init_queue = True
 
     def save_state():
-        # FIXME atomic_save_json(ctx, path)
-        log.warning("State not saved")  # FIXME
-        pass
+        atomic_save_json(ctx, path)
+        # log.warning("State not saved")  # FIXME
 
     while True:
         try:
+            # ---- Initialisation du bot
             # Conf par défaut
+            path = Path("ctx", bot_name + ".json")
             ctx = Ctx(
                 {
                     "state": STATE_INIT,
@@ -99,49 +92,20 @@ async def bot(client: AsyncClient,
                     "wallet": {}
                 })
 
-            # Récupération du symbol
+            # Récupération des paramètres
             symbol = conf["symbol"]
             lower_percent = Decimal(conf['winter'].strip('%')) / 100
             upper_percent = Decimal(conf['summer'].strip('%')) / 100
-
             if 'top' in conf:
-                top_value = Decimal(conf["top"])
+                top_value = Decimal(conf["top"])  # Top fixé
             else:
-                top_value = max([Decimal(kline[2]) for kline in
+                top_value = max([Decimal(kline[2]) for kline in # Top déduit de l'historique
                                  await client.get_historical_klines(symbol, Client.KLINE_INTERVAL_1MONTH,
                                                                     "5 years ago UTC")])
-            ctx.target_summer = top_value * (1 + upper_percent)
 
-            base, quote = split_symbol(symbol)
-            balance_base = next(filter(lambda x: x['asset'] == base, client_account['balances']))
-            balance_quote = next(filter(lambda x: x['asset'] == quote, client_account['balances']))
-
-            path = Path("ctx", bot_name + ".json")
-            symbol_info = await client.get_symbol_info(symbol)
-
+            # ---- Gestion des queues de communications asynchones
             input_queue = agent_queues[bot_name]  # Queue to receive msg for user or other agent
             market_queue = asyncio.Queue()  # Queue to receive event from market
-
-            # Ajuster suivant le démarrage
-            # Prendre la somme en USDT la plus grande pour choisir
-            # ctx.state = STATE_WAIT_SUMMER # FIXME: a virer
-
-            # Lecture de l'état courant de l'agent
-            if path.exists():
-                obj, rollback = atomic_load_json(path)
-                ctx = Ctx(obj)
-                if rollback:  # TODO: impossible de lire le tous dernier context de l'agent
-                    ctx.previous_state = ctx.state
-                    ctx.state = "resynchronize"  # FIXME
-                ctx.wallet = {k:Decimal(v) for k,v in ctx.wallet.items() }
-                # Ajuste le solde dispo dynamiquement
-                # ctx.base_quantity = Decimal(ctx.base_quantity)
-                # ctx.quote_quantity = Decimal(ctx.quote_quantity)
-                # balance_base['agent_free'] -= ctx.base_quantity  # FIXME: c'est pas bon en cas de boucle
-                # balance_quote['agent_free'] -= ctx.quote_quantity
-
-            else:
-                log.info(f"Started")
 
             # L'enregistrement des streams ne doit être fait qu'au début du traitement
             # Peux recevoir des messages non demandés
@@ -159,6 +123,41 @@ async def bot(client: AsyncClient,
             user_queue = asyncio.Queue()  # Queue to receive event from user account
             add_user_socket(lambda msg: user_queue.put_nowait(msg))
 
+
+            # ---- Analyse des paramètres
+            # Calcul de la cible top pour vendre
+            ctx.target_summer = top_value * (1 + upper_percent)
+
+            # Récupération des contraintes des devices
+            symbol_info = await client.get_symbol_info(symbol)
+
+            # Récupération des balances du wallet master
+            base, quote = split_symbol(symbol)
+            balance_base = next(filter(lambda x: x['asset'] == base, client_account['balances']))
+            balance_quote = next(filter(lambda x: x['asset'] == quote, client_account['balances']))
+
+            # ----------------- Reprise du context après un crash ou un reboot
+            if path.exists():
+                obj, rollback = atomic_load_json(path)
+                ctx = Ctx(obj)
+                if rollback:
+                    # TODO: impossible de lire le tous dernier context de l'agent. On repart avec l'avant dernier
+                    ctx.previous_state = ctx.state
+                    ctx.state = "resynchronize"  # FIXME
+                # Ajustement du context JSon avec des types Python
+                # Ajuste le type du wallet
+                ctx.wallet = {k:Decimal(v) for k,v in ctx.wallet.items() }
+                # Reprise des generateurs
+                if 'winter_order_ctx' in ctx:
+                    ctx.winter_order = await AddOrder.load(client, user_queue, log, ctx.winter_order)
+                if 'summer_order_ctx' in ctx:
+                    ctx.summer_order = await AddOrder.load(client, user_queue, log, ctx.summer_order)
+
+            else:
+                # Premier démarrage
+                log.info(f"Started")
+
+
             # FIXME Clean all new order for symbol
             log.warning("Cancel all orders !")
             for order in await client.get_all_orders(symbol=symbol):
@@ -170,7 +169,7 @@ async def bot(client: AsyncClient,
             # for order in open_orders:
             #     log.info(f'Open order {order["orderId"]}')
 
-            # Attend le démarrage des queues user et multiplex
+            # ----- Synchronisation entre les agents: Attend le démarrage des queues user et multiplex
             if wait_init_queue:
                 await wait_queue_init(input_queue)
                 wait_init_queue = False
@@ -179,16 +178,11 @@ async def bot(client: AsyncClient,
             # for b in info['balances']:
             #     print(f'{b["asset"]}:{b["free"]}/{b["locked"]}')
 
-            # Reprise du generateur order
-            if 'winter_order_ctx' in ctx:
-                winter_order = await restart_order_generator(client, user_queue, log, ctx.winter_order_ctx)
-            if 'summer_order_ctx' in ctx:
-                summer_order = await restart_order_generator(client, user_queue, log, ctx.summer_order_ctx)
-
             # Finite state machine
+            # C'est ici que le bot travaille sans fin, en sauvant sont état à chaque transition
             while True:
                 try:
-                    # Reception d'ordre venant de l'API. Par exemple, ajout de fond, arret, etc.
+                    # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
                     msg = input_queue.get_nowait()
                     if msg['msg'] == 'kill':
                         log.warning("Receive kill")
@@ -201,6 +195,7 @@ async def bot(client: AsyncClient,
                     # puis convertie en USDT pour savoir lequel est le plus gros
                     # Cela permet de savoir la saison. L'autre devise est acheté ou vendu pour
                     # avoir l'un des soldes à zéro.
+                    # TODO: gérer les soldes entres les bots
                     ctx.quote_quantity = Decimal(0)
                     ctx.base_quantity = Decimal(0)
                     quote_quantity=conf.get('quote_quantity',"0")
@@ -223,8 +218,8 @@ async def bot(client: AsyncClient,
                     quote_usdt=await to_usdt(client,quote,ctx.wallet[quote])
 
                     log.info(f"Start with {dstr(ctx.base_quantity)} {base} "
-                             f"({dstr(base_usdt)}$) and "
-                             f"{dstr(ctx.quote_quantity)} {quote} ({dstr(quote_usdt)}$)")
+                             f"(${dstr(base_usdt)}) and "
+                             f"{dstr(ctx.quote_quantity)} {quote} (${dstr(quote_usdt)})")
                     if base_usdt < quote_usdt:
                         # On est en ete
                         ctx.state = STATE_WINTER_ORDER if not base_usdt else STATE_ALIGN_WINTER
@@ -248,7 +243,7 @@ async def bot(client: AsyncClient,
                     check_order(symbol_info, current_price, order.get('price'), order.get('quantity'))
                     log.info(f"Try to {order['side']} {order['quoteOrderQty']} {base} at market ...")
                     await client.create_test_order(**json_order(order))
-                    winter_order, ctx.winter_order_ctx = await create_order_generator(
+                    ctx.winter_order = await AddOrder.create(
                         client,
                         user_queue,
                         log,
@@ -257,17 +252,14 @@ async def bot(client: AsyncClient,
                     ctx.state = STATE_WAIT_ALIGN_WINTER_ORDER_FILLED
                     save_state()
                 elif ctx.state == STATE_WAIT_ALIGN_WINTER_ORDER_FILLED:
-                    ctx.winter_order_ctx = await winter_order.asend(None)
-                    if ctx.winter_order_ctx.state == STATE_ORDER_FILLED:
-                        ctx.buy_quantity_base = Decimal(ctx.winter_order_ctx.order['executedQty'])
-                        ctx.buy_price_base = Decimal(ctx.winter_order_ctx.order['price'])
-                        log.info(f"{ctx.winter_order_ctx.order['side']} {ctx.buy_quantity_base} {base} at {ctx.buy_price_base}")
-                        del ctx.winter_order_ctx
+                    order_state = await ctx.winter_order.next()
+                    if order_state == AddOrder.STATE_ORDER_FILLED:
+                        del ctx.winter_order
                         ctx.state = STATE_WINTER_ORDER
                         log.info(f"{ctx.wallet=}")
                         log.info("Wait the summer...")
                         save_state()
-                    elif ctx.winter_order_ctx.state == STATE_ERROR:
+                    elif order_state == AddOrder.STATE_ERROR:
                         # FIXME
                         ctx.state == STATE_ERROR
                         save_state()
@@ -287,7 +279,7 @@ async def bot(client: AsyncClient,
                     order['quantity'] = round_step_size(order['quantity'], symbol_info.lot.stepSize)
                     log_add_order(log,order)
                     await client.create_test_order(**json_order(order))
-                    summer_order, ctx.summer_order_ctx = await create_order_generator(
+                    ctx.summer_order = await AddOrder.creater(
                         client,
                         user_queue,
                         log,
@@ -296,19 +288,16 @@ async def bot(client: AsyncClient,
                     ctx.state = STATE_WAIT_ALIGN_SUMMER_ORDER_FILLED
                     save_state()
                 elif ctx.state == STATE_WAIT_ALIGN_SUMMER_ORDER_FILLED:
-                    ctx.summer_order_ctx = await summer_order.asend(None)
-                    if ctx.summer_order_ctx.state == STATE_ORDER_FILLED:
-                        ctx.wallet = update_wallet(ctx.wallet,ctx.summer_order_ctx.order)
-                        ctx.buy_quantity_base = Decimal(ctx.summer_order_ctx.order['executedQty'])
-                        # FIXME: le calcul avec fills
-                        ctx.buy_price_base = Decimal(ctx.summer_order_ctx.order['fills'][0]['price'])
-                        log_order(log, ctx.summer_order_ctx.order)
-                        del ctx.summer_order_ctx
+                    order_state = await ctx.summer_order.next()
+                    if order_state == AddOrder.STATE_ORDER_FILLED:
+                        ctx.wallet = update_wallet(ctx.wallet, ctx.summer_order.order)
+                        log_order(log, ctx.summer_order.order)
+                        del ctx.summer_order
                         ctx.state = STATE_WINTER_ORDER
                         log.info(f"{ctx.wallet=}")
                         log.info(f"Wait the winters... ({dstr(ctx.wallet[base])} {base} / {dstr(ctx.wallet[quote])} {quote})")
                         save_state()
-                    elif ctx.summer_order_ctx.state == STATE_ERROR:
+                    elif order_state == AddOrder.STATE_ERROR:
                         # FIXME
                         ctx.state == STATE_ERROR
                         save_state()
@@ -339,7 +328,7 @@ async def bot(client: AsyncClient,
                     log.info(f"{json_order(order)=}")
                     try:
                         await client.create_test_order(**json_order(order))
-                        winter_order, ctx.winter_order_ctx = await create_order_generator(
+                        ctx.winter_order = await AddOrder.create(
                             client,
                             user_queue,
                             log,
@@ -359,19 +348,16 @@ async def bot(client: AsyncClient,
 
 
                 elif ctx.state == STATE_WAIT_WINTER_ORDER_FILLED:
-                    ctx.winter_order_ctx = await winter_order.asend(None)
-                    if ctx.winter_order_ctx.state == STATE_ORDER_FILLED:
-                        ctx.wallet = update_wallet(ctx.wallet,ctx.winter_order_ctx.order)
-                        ctx.buy_quantity_base = Decimal(ctx.winter_order_ctx.order['executedQty'])
-                        ctx.buy_price_base = Decimal(ctx.winter_order_ctx.order['price'])
-                        log.info(f"*** Buy {ctx.buy_quantity_base} {base} at {ctx.buy_price_base}")
-                        del ctx.winter_order_ctx
+                    order_state = await ctx.winter_order.next()
+                    if order_state == AddOrder.STATE_ORDER_FILLED:
+                        ctx.wallet = update_wallet(ctx.wallet, ctx.winter_order.order)
+                        del ctx.winter_order
                         ctx.state = STATE_WAIT_SUMMER
                         log.info(f"{ctx.wallet=}")
                         log.info("Wait the summer...")
                         save_state()
                     # TODO: si ordre expirer, le relancer
-                    elif ctx.winter_order_ctx.state == STATE_ERROR:
+                    elif order_state == AddOrder.STATE_ERROR:
                         # FIXME
                         ctx.state == STATE_ERROR
                         save_state()
@@ -394,7 +380,7 @@ async def bot(client: AsyncClient,
                     order = update_order(symbol_info, current_price, order)
                     # FIXME check_order(symbol_info, current_price, order['price'], order.get('quantity',None))
                     await client.create_test_order(**json_order(order))
-                    summer_order, ctx.summer_order_ctx = await create_order_generator(
+                    ctx.summer_order = await AddOrder.create(
                         client,
                         user_queue,
                         log,
@@ -405,18 +391,18 @@ async def bot(client: AsyncClient,
                     save_state()
 
                 elif ctx.state == STATE_WAIT_SUMMER_ORDER_FILLED:
-                    ctx.summer_order_ctx = await summer_order.asend(None)
-                    if ctx.summer_order_ctx.state == STATE_ORDER_FILLED:
-                        ctx.wallet = update_wallet(ctx.wallet,ctx.summer_order_ctx.order)
-                        sell_quantity_quote = Decimal(ctx.summer_order_ctx.order['executedQty'])
-                        sell_price_quote = Decimal(ctx.summer_order_ctx.order['price'])
+                    order_state = await ctx.summer_order.next()
+                    if order_state == AddOrder.STATE_ORDER_FILLED:
+                        ctx.wallet = update_wallet(ctx.wallet, ctx.summer_order.order)
+                        sell_quantity_quote = Decimal(ctx.summer_order.order['executedQty'])
+                        sell_price_quote = Decimal(ctx.summer_order.order['price'])
                         log.info(f"*** Sell {sell_quantity_quote} {quote} at {sell_price_quote}")
-                        del ctx.summer_order_ctx
+                        del ctx.summer_order
                         # TODO: calcul du gain
                         ctx.state = STATE_WINTER_ORDER
                         log.info("Wait the winter...")
                         save_state()
-                    elif ctx.summer_order_ctx.state == STATE_ERROR:
+                    elif order_state == AddOrder.STATE_ERROR:
                         # FIXME
                         ctx.state == STATE_ERROR
                         save_state()

@@ -92,8 +92,11 @@ async def main():
 
 
 if __name__ == "__main__":
-    load_dotenv()
-    decimal.getcontext().prec = 20
-    logging.basicConfig(level=logging.INFO)
-    loop = get_event_loop()
-    loop.run_until_complete(main())
+    try:
+        load_dotenv()
+        decimal.getcontext().prec = 20
+        logging.basicConfig(level=logging.INFO)
+        loop = get_event_loop()
+        loop.run_until_complete(main())
+    except KeyboardInterrupt as e:
+        logging.info("Quit by user")
