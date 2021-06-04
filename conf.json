@@ -6,7 +6,7 @@
     "user_stream": {}
   },
   {
-    "long_strategy": {
+    "winter_summer": {
       "symbol": "ETHUSDT",
       "quote_quantity": "50",
 // FIXME     "base_quantity": "1",

@@ -5,6 +5,7 @@ L'état order_ctx.state fini par etre STATE_ERROR ou STATE_ORDER_FILLED.
 """
 import asyncio
 import logging
+from abc import abstractmethod
 from asyncio import Queue, wait_for
 from json import JSONEncoder
 from queue import Empty
@@ -20,14 +21,15 @@ from binance.enums import ORDER_STATUS_FILLED, ORDER_STATUS_NEW, ORDER_STATUS_RE
 #     MIN_RECONNECT_WAIT = 0.1
 #     TIMEOUT = 10
 #     NO_MESSAGE_RECONNECT_TIMEOUT = 60
+from binance.exceptions import BinanceAPIException
+
+from bot_generator import BotGenerator
 from conf import STREAM_MSG_TIMEOUT
 from tools import log_order
 
-# Mémorise l'état de l'automate, pour permettre une reprise à froid
+class AddOrder(BotGenerator):
+    POOLING_SLEEP = 2
 
-POOLING_SLEEP = 2
-
-class AddOrder(dict):
     STATE_INIT = "init"
     STATE_ADD_ORDER = "add_order"
     STATE_WAIT_ORDER = "wait_order"
@@ -38,42 +40,18 @@ class AddOrder(dict):
     STATE_ORDER_EXPIRED = "order_expired"
     STATE_ERROR = "order_error"
 
-    @classmethod
-    async def create(cls,
-                     client: AsyncClient,
-                     user_queue: Queue,
-                     log: logging,
-                     order:Dict[str,Any]) -> 'AddOrder':
-        return await AddOrder()._start(client,user_queue,log,order=order)
-
-    async def load(cls,
-                   client: AsyncClient,
-                   user_queue: Queue,
-                   log: logging,
-                   ctx: Dict[str,Any]) -> 'AddOrder':
-        order_agent = AddOrder()._start()
-        order_agent.update(ctx)
-        return order_agent._start(client,user_queue,log)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.__dict__ = self
-
-    async def next(self) -> str:
-        await self._generator.asend(None)
-        return self.state
-
     async def _start(self,
                      client: AsyncClient,
                      user_queue: Queue,
                      log: logging,
+                     init:Dict[str,Any],
                      **kwargs) -> 'AddOrder':
-        # kwargs -- dictionary of named arguments
-        self._generator = self._order_generator(client,
-                                                user_queue,
-                                                log)
-        if 'order' in kwargs:
-            # Start automate
+        self._generator = self.generator(client,
+                                         user_queue,
+                                         log,
+                                         init)
+        # Start automate
+        if not init:
             self.update({
                     "state": AddOrder.STATE_INIT,
                     "order": kwargs['order']
@@ -81,10 +59,17 @@ class AddOrder(dict):
         await self.next()
         return self
 
-    async def _order_generator(self,
-                               client,
-                               user_queue: Queue,
-                               log: logging):
+
+    async def generator(self,
+                        client,
+                        user_queue: Queue,
+                        log: logging,
+                        init:Dict[str,Any]):
+        if not init:
+            init = {
+                "state": AddOrder.STATE_INIT,
+            }
+        self.update(init)
         # Resynchronise l'état sauvegardé
         if self.state in (AddOrder.STATE_ORDER_CONFIRMED, AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET):
             # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
@@ -114,10 +99,18 @@ class AddOrder(dict):
                 # TODO: test l'ordre pour vérifier que le solde est bon.
                 await client.create_test_order(**self.order)  # FIXME: capture de l'exception
                 # Puis essaye de l'executer
-                order = await client.create_order(**self.order)
+                try:
+                    order = await client.create_order(**self.order)
+                except BinanceAPIException as ex:
+                    if ex.code == -2010:  # Duplicate order sent, ignore
+                        # Retrouve l'ordre dupliqué
+                        orders = await client.get_all_orders(symbol=symbol)
+                        order = next(filter(lambda x: x.get("clientOrderId", "") == self.order["newClientOrderId"], orders))
+                    else :
+                        raise
 
                 # C'est bon, il est passé
-                log.info(f'Order \'{order["clientOrderId"]}\' created')
+                log.debug(f'Order \'{order["clientOrderId"]}\' created')
                 self.order = order
                 self.state = AddOrder.STATE_ORDER_CONFIRMED
                 yield self
@@ -132,7 +125,7 @@ class AddOrder(dict):
                     # Finalement, l'ordre n'est pas passé, on le relance
                     log.info(f'Resend order {self.order["newClientOrderId"]}...')
                     order = await client.create_order(**self.order)
-                    log.info(f'Order {order["clientOrderId"]} created')
+                    log.debug(f'Order {order["clientOrderId"]} created')
                     self.order = order
                 else:
                     # Il est passé, donc on reprend de là.

@@ -1,5 +1,6 @@
 import logging
 import os
+import tracemalloc
 from asyncio import Queue, sleep
 from asyncio import TimeoutError, gather, get_event_loop
 from importlib import import_module
@@ -94,8 +95,12 @@ async def main():
 if __name__ == "__main__":
     try:
         load_dotenv()
+        if os.environ.get("DEBUG","false")=="true":
+            tracemalloc.start()
+            logging.basicConfig(level=logging.DEBUG)
+        else:
+            logging.basicConfig(level=logging.INFO)
         decimal.getcontext().prec = 20
-        logging.basicConfig(level=logging.INFO)
         loop = get_event_loop()
         loop.run_until_complete(main())
     except KeyboardInterrupt as e:
