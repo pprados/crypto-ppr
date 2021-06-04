@@ -1,3 +1,6 @@
 [submodule "python-binance"]
 	path = python-binance
-	url = https://github.com/sammchardy/python-binance.git
+	url = https://github.com/pprados/python-binance.git
+[submodule "binance-api-postman"]
+	path = binance-api-postman
+	url = https://github.com/binance/binance-api-postman.git

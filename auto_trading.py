@@ -1,29 +1,34 @@
-from asyncio import TimeoutError, gather, get_event_loop
 import logging
 import os
 from asyncio import Queue, sleep
+from asyncio import TimeoutError, gather, get_event_loop
 from importlib import import_module
 from pathlib import Path
 from typing import Dict
+import decimal
 
 from aiohttp import ClientConnectorError
+from binance import BinanceSocketManager
 from binance.exceptions import BinanceAPIException
+from dotenv import load_dotenv
 
 from TypingClient import TypingClient
 from conf import MIN_RECONNECT_WAIT
 from tools import atomic_load_json
-from dotenv import load_dotenv
 
 api_key = os.environ["BINANCE_API_KEY"]
 api_secret = os.environ["BINANCE_API_SECRET"]
-test_net = os.environ.get("BINANCE_API_TEST","false").lower() == "true"
+test_net = os.environ.get("BINANCE_API_TEST", "false").lower() == "true"
 
-log = logging.getLogger(__name__)
 
 
 async def main():
+    log = logging.getLogger(__name__)
     client = None
+    log.info("Start auto_trading")
     while True:
+        agents = []
+        agent_queues: Dict[str, Queue] = {}
         try:
             conf, rollback = atomic_load_json(Path("conf.json"))
             if rollback:
@@ -34,6 +39,8 @@ async def main():
                 # {"verify": False, "timeout": 20}
                 # client = await AsyncClient.create(api_key, api_secret, testnet=test_net)
                 client = await TypingClient.create(api_key, api_secret, testnet=test_net)
+                socket_manager = BinanceSocketManager(client._delegate, user_timeout=60)
+
                 # client = Client(api_key, api_secret, testnet=test_net)
 
                 # Création des agents à partir de conf.json.
@@ -43,8 +50,6 @@ async def main():
                 # sinon, c'est le nom de l'agent qui est utilisé. Cela permet d'invoquer le même agent avec plusieurs jeux de
                 # parametres.
                 # Le nom peut se limiter au module, ou etre complet (module or module.ma_fonction)
-                agents = []
-                agent_queues: Dict[str, Queue] = {}
 
                 # Les infos du comptes, pour savoir ce qui est gardé par les agents
                 client_account = await client.get_account()
@@ -62,12 +67,23 @@ async def main():
                     async_fun = getattr(import_module(module_path), fn)
 
                     agent_queues[agent_name] = Queue()
-                    agents.append(loop.create_task(async_fun(client, client_account, agent_name, agent_queues, conf)))
+                    agents.append(loop.create_task(async_fun(client,
+                                                             socket_manager,
+                                                             client_account,
+                                                             agent_name,
+                                                             agent_queues,
+                                                             conf)))
 
                 await gather(*agents, return_exceptions=True)  # Lance tous les agents en //
-        except (BinanceAPIException, ClientConnectorError,TimeoutError) as ex:
+        except (BinanceAPIException, ClientConnectorError, TimeoutError) as ex:
             # Wait and retry
             log.exception("Binance communication error")
+            for agent in agent_queues.values:
+                agent.put_nowait(
+                    {
+                        "from": "_root",
+                        "msg": "kill"
+                    })
             await sleep(MIN_RECONNECT_WAIT)
             log.info("Try to reconnect")
         finally:
@@ -77,6 +93,7 @@ async def main():
 
 if __name__ == "__main__":
     load_dotenv()
-    logging.basicConfig(level=logging.DEBUG)
+    decimal.getcontext().prec = 20
+    logging.basicConfig(level=logging.INFO)
     loop = get_event_loop()
     loop.run_until_complete(main())

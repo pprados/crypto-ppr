@@ -178,3 +178,6 @@ Cela peut être valorisé dans un fichier `.env`
 - buy range oro (donner top/down du range, puis un %. Place un ordre ORO a x% au dessus et au dessous du range)
 - grid bot
 - smart buy, sell, ...
+
+# Notes
+Type d'ordres https://www.binance.com/en/support/articles/360033779452

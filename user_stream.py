@@ -1,7 +1,7 @@
 """
 Agent pour distribuer les events websocket aux autres agents
 """
-import asyncio
+from asyncio import TimeoutError, get_running_loop, QueueEmpty
 import logging
 from asyncio import sleep, Queue
 from typing import Callable, Dict, Any, List
@@ -17,16 +17,17 @@ def add_user_socket(cb: Callable[[Dict[str, Any], Any], None]):
 
 
 async def bot(client: AsyncClient,
+              socket_manager:BinanceSocketManager,
               client_account:Dict[str,Any],
               bot_name: str,
               agent_queues: Dict[str, Queue],
               conf: Dict[str, Any]):
     log = logging.getLogger(bot_name)
+    input_queue = agent_queues[bot_name]  # Queue to receive msg for user or other agent
     await sleep(1)  # Time for waiting the initialisation of others agents
     # and start to listen
-    loop = asyncio.get_running_loop()
-    bm = BinanceSocketManager(client._delegate, user_timeout=60)
-    ms = bm.user_socket()
+    loop = get_running_loop()
+    ms = socket_manager.user_socket()
     start = True
     while True:
         try:
@@ -42,6 +43,15 @@ async def bot(client: AsyncClient,
 
                                 })
                         start = False
+                    try:
+                        # Reception d'ordre venant de l'API. Par exemple, ajout de fond, arret, etc.
+                        msg = input_queue.get_nowait()  # FIXME: lecture de 2 queues en //
+                        if msg['msg'] == 'kill':
+                            log.warning("Receive kill")
+                            return
+                    except QueueEmpty:
+                        pass  # Ignore
+
                     msg = await mscm.recv()
                     # await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
                     for cb in _call_back:

@@ -7,10 +7,12 @@
   },
   {
     "long_strategy": {
-      "symbol": "BNBBUSD",
-      "quote_quantity": "0.1%",
-      "winter": "-30%",
-      "summer": "2%"
+      "symbol": "ETHUSDT",
+      "quote_quantity": "50",
+// FIXME     "base_quantity": "1",
+      "winter": "-0%",
+//      "top": 1800,
+      "summer": "0%"
     }
   }
 ]

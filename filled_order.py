@@ -10,7 +10,8 @@ from queue import Empty
 from typing import AsyncGenerator, Tuple, Dict, Any
 
 from binance import AsyncClient
-from binance.enums import ORDER_STATUS_FILLED, ORDER_STATUS_NEW
+from binance.enums import ORDER_STATUS_FILLED, ORDER_STATUS_NEW, ORDER_STATUS_REJECTED, ORDER_STATUS_EXPIRED, \
+    ORDER_STATUS_PARTIALLY_FILLED
 
 # Mémorise l'état de l'automate, pour permettre une reprise à froid
 
@@ -21,6 +22,7 @@ from binance.enums import ORDER_STATUS_FILLED, ORDER_STATUS_NEW
 #     TIMEOUT = 10
 #     NO_MESSAGE_RECONNECT_TIMEOUT = 60
 from conf import STREAM_MSG_TIMEOUT
+from tools import log_order
 
 POOLING_SLEEP = 2
 
@@ -31,6 +33,7 @@ STATE_ORDER_CONFIRMED = "order_confirmed"
 STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET = "wait_order_filled_with_websocket"
 STATE_WAIT_ORDER_FILLED_WITH_POLLING = "wait_order_filled_with_polling"
 STATE_ORDER_FILLED = "order_filled"
+STATE_ORDER_EXPIRED = "order_expired"
 STATE_ERROR = "order_error"
 
 
@@ -96,12 +99,13 @@ async def order_generator(client,
             yield ctx
 
             # TODO: test l'ordre pour vérifier que le solde est bon.
+            await client.create_test_order(**ctx.pre_order) # FIXME: capture de l'exception
             # Puis essaye de l'executer
             order = await client.create_order(**ctx.pre_order)
 
             # C'est bon, il est passé
-            log.info(f'Order {order["clientOrderId"]} created')
-            ctx.last_order = order
+            log.info(f'Order \'{order["clientOrderId"]}\' created')
+            ctx.order = order
             ctx.state = STATE_ORDER_CONFIRMED
             yield ctx
 
@@ -116,10 +120,10 @@ async def order_generator(client,
                 log.info(f'Resend order {ctx.pre_order["newClientOrderId"]}...')
                 order = await client.create_order(**ctx.pre_order)
                 log.info(f'Order {order["clientOrderId"]} created')
-                ctx.last_order = order
+                ctx.order = order
             else:
                 # Il est passé, donc on reprend de là.
-                ctx.last_order = pending_order[0]
+                ctx.order = pending_order[0]
                 log.info(f'Recover order {order["clientOrderId"]}')
             ctx.state = STATE_ORDER_CONFIRMED
             yield ctx
@@ -133,6 +137,7 @@ async def order_generator(client,
             try:
 
                 log.debug("Wait event order status...")
+                # FIXME: incompatible avec plusieurs ordres en meme temps
                 msg = await wait_for(_get_user_msg() , timeout=STREAM_MSG_TIMEOUT)
                 # See https://github.com/binance/binance-spot-api-docs/blob/master/user-data-stream.md
                 if msg['e'] == "error":
@@ -141,9 +146,9 @@ async def order_generator(client,
                     yield ctx
                 elif msg['e'] == "executionReport" and \
                         msg['s'] == symbol and \
-                        msg['i'] == ctx['last_order']['orderId'] and \
+                        msg['i'] == ctx['order']['orderId'] and \
                         msg['X'] != ORDER_STATUS_NEW:
-                    ctx.state = STATE_ORDER_FILLED
+                    ctx.state = STATE_WAIT_ORDER_FILLED_WITH_POLLING
                     yield ctx
                     log.info("Receive event for order")
                 user_queue.task_done()
@@ -153,20 +158,38 @@ async def order_generator(client,
                 yield ctx
         elif ctx.state == STATE_WAIT_ORDER_FILLED_WITH_POLLING:
             log.debug("Polling get order status...")
-            order = await client.get_order(symbol=ctx['last_order']['symbol'],
-                                           orderId=ctx['last_order']['orderId'])
-            if order['status'] == ORDER_STATUS_FILLED:
-                log.info(f'Order {order["orderId"]} filled')
+            order = await client.get_order(symbol=ctx['order']['symbol'],
+                                           orderId=ctx['order']['orderId'])
+            # See https://binance-docs.github.io/apidocs/spot/en/#public-api-definitions
+            if order['status'] == ORDER_STATUS_FILLED:  # or ORDER_STATUS_IOY_FILLED
+                log_order(log, order)
+                ctx.order = order
                 ctx.state = STATE_ORDER_FILLED
                 yield ctx
-            elif order['status'] != ORDER_STATUS_NEW:
-                log.error(f'Order {order["orderId"]} in error')
+            if order['status'] == ORDER_STATUS_PARTIALLY_FILLED:  # or ORDER_STATUS_PARTIALLY_FILLED
+                # FIXME: a traiter
+                log.warning("PARTIALLY")
+                log_order(log, order)
+                ctx.order = order
+                ctx.state = STATE_ORDER_FILLED
+                yield ctx
+            elif order['status'] == ORDER_STATUS_REJECTED:
+                log.error(f'Order {order["orderId"]} is rejected')
+                ctx.order = order
                 ctx.state = STATE_ERROR
                 yield ctx
-            else:
-                ctx.state = STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
+            elif order['status'] == ORDER_STATUS_EXPIRED:
+                log.warning(f'Order {order["orderId"]} is expired. Retry.')
+                ctx.state = STATE_ORDER_EXPIRED  # Retry
                 yield ctx
+                ctx.state = STATE_ADD_ORDER  # Retry
+            elif order['status'] == ORDER_STATUS_NEW:
+                # FIXME: ctx.state = STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
+                yield ctx
+                # FIXME: si on sait que le stream est done...
                 # await sleep(POOLING_SLEEP)
+            else:
+                assert False, f"Unknown status {order['status']}"
         elif ctx.state == STATE_ORDER_FILLED:
             pass
         elif ctx.state == STATE_ERROR:
