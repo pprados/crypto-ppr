@@ -5,16 +5,13 @@ L'état order_ctx.state fini par etre STATE_ERROR ou STATE_ORDER_FILLED.
 """
 import asyncio
 import logging
-from abc import abstractmethod
 from asyncio import Queue, wait_for
-from json import JSONEncoder
 from queue import Empty
-from typing import AsyncGenerator, Tuple, Dict, Any
+from typing import Dict, Any
 
 from binance import AsyncClient
 from binance.enums import ORDER_STATUS_FILLED, ORDER_STATUS_NEW, ORDER_STATUS_REJECTED, ORDER_STATUS_EXPIRED, \
     ORDER_STATUS_PARTIALLY_FILLED
-
 # TODO: a voir dans streams
 #     MAX_RECONNECTS = 5
 #     MAX_RECONNECT_SECONDS = 60
@@ -25,7 +22,8 @@ from binance.exceptions import BinanceAPIException
 
 from bot_generator import BotGenerator
 from conf import STREAM_MSG_TIMEOUT
-from tools import log_order
+from tools import log_order, update_wallet
+
 
 class AddOrder(BotGenerator):
     POOLING_SLEEP = 2
@@ -38,27 +36,23 @@ class AddOrder(BotGenerator):
     STATE_WAIT_ORDER_FILLED_WITH_POLLING = "wait_order_filled_with_polling"
     STATE_ORDER_FILLED = "order_filled"
     STATE_ORDER_EXPIRED = "order_expired"
+    STATE_CANCELING = "order_canceling"
+    STATE_CANCELED = "order_canceled"
     STATE_ERROR = "order_error"
 
     async def _start(self,
                      client: AsyncClient,
                      user_queue: Queue,
                      log: logging,
-                     init:Dict[str,Any],
+                     init: Dict[str, Any],
                      **kwargs) -> 'AddOrder':
         self._generator = self.generator(client,
                                          user_queue,
                                          log,
-                                         init)
-        # Start automate
-        if not init:
-            self.update({
-                    "state": AddOrder.STATE_INIT,
-                    "order": kwargs['order']
-                })
+                                         init,
+                                         **kwargs)
         await self.next()
         return self
-
 
     def is_filled(self):
         return self.state == AddOrder.STATE_ORDER_FILLED
@@ -70,20 +64,29 @@ class AddOrder(BotGenerator):
     def is_error(self):
         return self.state == AddOrder.STATE_ERROR
 
+    def is_waiting(self):
+        return self.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+
     def cancel(self):
         self.previous_state = self.state
-        self.state = "Cancel"
+        self.state = AddOrder.STATE_CANCELING
+
+    def is_canceled(self):
+        return self.state == AddOrder.STATE_CANCELED
 
     async def generator(self,
                         client,
                         user_queue: Queue,
                         log: logging,
-                        init:Dict[str,Any]):
+                        init: Dict[str, Any],
+                        **kwargs):
         if not init:
             init = {
                 "state": AddOrder.STATE_INIT,
+                "order": kwargs['order']
             }
         self.update(init)
+        wallet = kwargs['wallet']
         # Resynchronise l'état sauvegardé
         if self.state in (AddOrder.STATE_ORDER_CONFIRMED, AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET):
             # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
@@ -107,20 +110,24 @@ class AddOrder(BotGenerator):
                 self.state = AddOrder.STATE_ADD_ORDER
             elif self.state == AddOrder.STATE_ADD_ORDER:
                 # Prépare la création d'un ordre
-                self.state = AddOrder.STATE_WAIT_ORDER
-                yield self
-
-                # TODO: test l'ordre pour vérifier que le solde est bon.
                 await client.create_test_order(**self.order)  # FIXME: capture de l'exception
                 # Puis essaye de l'executer
                 try:
                     order = await client.create_order(**self.order)
                 except BinanceAPIException as ex:
-                    if ex.code == -2010:  # Duplicate order sent, ignore
-                        # Retrouve l'ordre dupliqué
+                    if ex.code == -2010:  # Duplicate order sent ?, ignore
+                        # TODO: il faut analyser le text
+                        if ex.message == "Account has insufficient balance for requested action.":
+                            self.state = AddOrder.STATE_ERROR
+                            yield self
+                        if ex.message.startswith("Filter failure:"):
+                            raise
+                        # Retrouve l'ordre dupliqué. FIXME: confirmer le message à filtrer
                         orders = await client.get_all_orders(symbol=symbol)
-                        order = next(filter(lambda x: x.get("clientOrderId", "") == self.order["newClientOrderId"], orders))
-                    else :
+                        order = next(
+                            filter(lambda x: x.get("clientOrderId", "") == self.order["newClientOrderId"], orders))
+                        # et continue
+                    else:
                         raise
 
                 # C'est bon, il est passé
@@ -185,6 +192,7 @@ class AddOrder(BotGenerator):
                     log_order(log, order)
                     self.order = order
                     self.state = AddOrder.STATE_ORDER_FILLED
+                    update_wallet(wallet, order)
                     yield self
                 if order['status'] == ORDER_STATUS_PARTIALLY_FILLED:  # or ORDER_STATUS_PARTIALLY_FILLED
                     # FIXME: a traiter
@@ -192,6 +200,7 @@ class AddOrder(BotGenerator):
                     log_order(log, order)
                     self.order = order
                     self.state = AddOrder.STATE_ORDER_FILLED
+                    update_wallet(wallet, order)
                     yield self
                 elif order['status'] == ORDER_STATUS_REJECTED:
                     log.error(f'Order {order["orderId"]} is rejected')
@@ -212,8 +221,12 @@ class AddOrder(BotGenerator):
                     assert False, f"Unknown status {order['status']}"
             elif self.state == AddOrder.STATE_ORDER_FILLED:
                 pass
-            elif self.state == AddOrder.STATE_ERROR:
-                pass  # FIXME
+            elif self.state == AddOrder.STATE_CANCELING:  # TODO
+                await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])
+                self.state = AddOrder.STATE_CANCELED
+                yield self
+            elif self.state == AddOrder.STATE_CANCELED:
+                return
             else:
                 log.error(f'Unknown state \'{self["state"]}\'')
                 self.state = AddOrder.STATE_ERROR

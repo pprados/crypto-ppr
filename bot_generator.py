@@ -10,6 +10,7 @@ from binance import AsyncClient
 # Une instance est compatible avec json. C'est un dictionnaire.
 # Il faut ajouter une méthode _start(...) qui doit créer un attribut _generator.
 
+STOPPED="stopped"
 
 class BotGenerator(dict):
     @classmethod
@@ -17,7 +18,7 @@ class BotGenerator(dict):
                      client: AsyncClient,
                      user_queue: Queue,
                      log: logging,
-                     init: Dict[str, Any] = {},
+                     init: Dict[str, Any]={},
                      **kwargs) -> 'AddOrder':
         init.pop("_generator", None)
         bot_generator = await cls()._start(client, user_queue, log, init, **kwargs)
@@ -29,8 +30,13 @@ class BotGenerator(dict):
         self.__dict__ = self
 
     async def next(self) -> str:
-        await self._generator.asend(None)
-        return self.state
+        try:
+            await self._generator.asend(None)
+            return self.state
+        except StopIteration:
+            return STOPPED
+        except StopAsyncIteration:
+            return STOPPED
 
     @abstractmethod
     async def _start(self, **kwargs):

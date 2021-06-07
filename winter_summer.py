@@ -8,27 +8,32 @@ Parametres:
       "symbol": "BNBBUSD",  # La paire à trader
       "base_quantity": "0.1%", # La quantité de 'base' à utiliser (ou zéro)
       "quote_quantity": "0.1%", # La quantité de 'quote' à utiliser (ou zéro mais l'un des deux)
-      "period": "1 week" # Moyenne entre top et bottom de la période précédente comme point de d'analyse
+      "interval": "1w" # Moyenne entre top et bottom de la période précédente comme point de d'analyse
       "winter": "-30%", # Si le marché tombe de 'winter' % sur la période, alors achète
       "summer": "2%" # Si le marché remonte au dessus du top, de 'summer' %, alors vend
 }
+
+Au début, aligne les 2 coins pour n'en avoir qu'un seul, suivant le plus gros.
+Ce n'est pas toujours possible, à cause des limites de ventes et d'achats de la paire.
+Pour le moment, cela génère une erreur, avant de trouver mieux.
 """
-import sys
 from asyncio import QueueEmpty, sleep
+from datetime import timezone
 from pathlib import Path
 
 from aiohttp import ClientConnectorError
 from binance import Client, BinanceSocketManager
-from binance.enums import SIDE_BUY, ORDER_TYPE_LIMIT, TIME_IN_FORCE_GTC, SIDE_SELL, ORDER_TYPE_MARKET
+from binance.enums import SIDE_BUY, ORDER_TYPE_LIMIT, TIME_IN_FORCE_GTC, SIDE_SELL, ORDER_TYPE_MARKET, \
+    KLINE_INTERVAL_1WEEK
 # Mémorise l'état de l'automate, pour permettre une reprise à froid
-from binance.exceptions import BinanceAPIException
 from binance.helpers import *
 
-from conf import MIN_RECONNECT_WAIT
 from add_order import *
+from bot_generator import STOPPED
+from conf import MIN_RECONNECT_WAIT
 from multiplex_stream import add_multiplex_socket
 from tools import atomic_load_json, generate_order_id, wait_queue_init, update_order, split_symbol, \
-    atomic_save_json, check_order, log_order, update_wallet, json_order, log_add_order, to_usdt
+    atomic_save_json, check_order, log_order, json_order, log_add_order, to_usdt, str_order
 
 
 # TODO: a voir dans streams
@@ -47,10 +52,12 @@ class WinterSummerBot(BotGenerator):
     STATE_INIT = "init"
     STATE_ALIGN_WINTER = "align_winter"
     STATE_WAIT_ALIGN_WINTER_ORDER_FILLED = "wait_align_winter_filled"
+    STATE_WAIT_ALIGN_WINTER_LOOP = "wait_align_winter_loop"
     STATE_ALIGN_SUMMER = "align_summer"
     STATE_WAIT_ALIGN_SUMMER_ORDER_FILLED = "wait_align_summer_filled"
     STATE_WINTER_ORDER = "winter_order"
     STATE_WAIT_WINTER_ORDER_FILLED = "wait_winter_order_filled"
+    STATE_WAIT_WINTER_CANCEL_ORDER = "wait_winter_cancel_order"
     STATE_WAIT_SUMMER = "wait_summer"
     STATE_WAIT_SUMMER_ORDER_FILLED = "wait_summer_order_filled"
 
@@ -82,7 +89,7 @@ class WinterSummerBot(BotGenerator):
                         init: Dict[str, Any],  # Initial context
                         socket_manager: BinanceSocketManager,
                         client_account: Dict[str, Any],
-                        genertor_name: str,
+                        generator_name: str,
                         agent_queues: Dict[str, Queue],  # All agent queues
                         conf: Dict[str, Any]) -> None:
         if not init:
@@ -92,9 +99,8 @@ class WinterSummerBot(BotGenerator):
                     "wallet": {}
                     }
         self.update(init)
-        init=None
+        del init
 
-        ctx = self
         yield self
         # TODO: capture des exceptions globale pour alerte
         wait_init_queue = True
@@ -112,6 +118,7 @@ class WinterSummerBot(BotGenerator):
                 top_value = max([Decimal(kline[2]) for kline in  # Top déduit de l'historique
                                  await client.get_historical_klines(symbol, Client.KLINE_INTERVAL_1MONTH,
                                                                     "5 years ago UTC")])
+            interval = conf.get("interval", KLINE_INTERVAL_1WEEK)
 
             # ---- Gestion des queues de communications asynchones
 
@@ -131,7 +138,7 @@ class WinterSummerBot(BotGenerator):
 
             # ---- Analyse des paramètres
             # Calcul de la cible top pour vendre
-            ctx.target_summer = top_value * (1 + upper_percent)
+            self.target_summer = top_value * (1 + upper_percent)
 
             # Récupération des contraintes des devices
             symbol_info = await client.get_symbol_info(symbol)
@@ -145,21 +152,27 @@ class WinterSummerBot(BotGenerator):
             if self:
                 # La lecture en json est pauvre. Ajuste en type Python plus riches
                 # Ajuste le type du wallet
-                ctx.wallet = {k: Decimal(v) for k, v in ctx.wallet.items()}
+                self.wallet = {k: Decimal(v) for k, v in self.wallet.items()}
                 # Reprise des generateurs pour les ordres
-                if 'winter_order' in ctx:
-                    ctx.winter_order = await AddOrder.create(client, user_queue, log, ctx.winter_order)
-                if 'summer_order' in ctx:
-                    ctx.summer_order = await AddOrder.create(client, user_queue, log, ctx.summer_order)
+                if 'winter_order' in self:
+                    self.winter_order = await AddOrder.create(client, user_queue, log,
+                                                              self.winter_order,
+                                                              order=self.winter_order['order'],
+                                                              wallet=self.wallet)
+                if 'summer_order' in self:
+                    self.summer_order = await AddOrder.create(client, user_queue, log,
+                                                              self.summer_order,
+                                                              order=self.summer_order['order'],
+                                                              wallet=self.wallet)
             else:
                 # Premier démarrage
                 log.info(f"Started")
 
             # FIXME Clean all new order for symbol
-            # log.warning("Cancel all orders !")
-            # for order in await client.get_all_orders(symbol=symbol):
-            #     if order["status"] == ORDER_STATUS_NEW:
-            #         await client.cancel_order(symbol=order["symbol"], orderId=order["orderId"])
+            log.warning("Cancel all orders !")
+            for order in await client.get_all_orders(symbol=symbol):
+                if order["status"] == ORDER_STATUS_NEW:
+                    await client.cancel_order(symbol=order["symbol"], orderId=order["orderId"])
 
             # List open order
             # open_orders=await client.get_open_orders(symbol='BNBBTC')
@@ -187,261 +200,321 @@ class WinterSummerBot(BotGenerator):
                 except QueueEmpty:
                     pass  # Ignore
 
-                if ctx.state == WinterSummerBot.STATE_INIT:
+                if self.state == WinterSummerBot.STATE_INIT:
                     # Récupère le volume de token à partir des balances free
                     # puis convertie en USDT pour savoir lequel est le plus gros
                     # Cela permet de savoir la saison. L'autre devise est acheté ou vendu pour
                     # avoir l'un des soldes à zéro.
-                    # TODO: gérer les soldes entres les bots
-                    ctx.quote_quantity = Decimal(0)
-                    ctx.base_quantity = Decimal(0)
                     quote_quantity = conf.get('quote_quantity', "0")
                     if '%' in quote_quantity:
-                        ctx.quote_quantity = Decimal(balance_quote['agent_free'] * Decimal(
+                        self.quote_quantity = Decimal(balance_quote['free'] * Decimal(
                             quote_quantity.strip('%')) / 100)
                     else:
-                        ctx.quote_quantity = Decimal(quote_quantity)
-                    ctx.wallet[quote] = ctx.quote_quantity
+                        self.quote_quantity = Decimal(quote_quantity)
 
                     base_quantity = conf.get('base_quantity', "0")
                     if '%' in base_quantity:
-                        ctx.base_quantity = Decimal(
-                            balance_base['agent_free'] * Decimal(base_quantity.strip('%')) / 100)
+                        self.base_quantity = Decimal(
+                            balance_base['free'] * Decimal(base_quantity.strip('%')) / 100)
                     else:
-                        ctx.base_quantity = Decimal(base_quantity)
-                    ctx.wallet[base] = ctx.base_quantity
-                    ctx.wallet[quote] = ctx.quote_quantity
+                        self.base_quantity = Decimal(base_quantity)
 
-                    base_usdt = await to_usdt(client, base, ctx.wallet[base])
-                    quote_usdt = await to_usdt(client, quote, ctx.wallet[quote])
+                    self.wallet[base] = self.base_quantity
+                    self.wallet[quote] = self.quote_quantity
 
-                    log.info(f"Start with {ctx.base_quantity:f} {base} "
+                    base_usdt = await to_usdt(client, base, self.wallet[base])
+                    quote_usdt = await to_usdt(client, quote, self.wallet[quote])
+
+                    log.info(f"Start with {self.base_quantity:f} {base} "
                              f"(${base_usdt:f}) and "
-                             f"{ctx.quote_quantity:f} {quote} (${quote_usdt:f})")
+                             f"{self.quote_quantity:f} {quote} (${quote_usdt:f})")
                     if base_usdt < quote_usdt:
                         # On est en ete
-                        ctx.state = WinterSummerBot.STATE_WINTER_ORDER if not base_usdt else WinterSummerBot.STATE_ALIGN_WINTER
+                        self.state = WinterSummerBot.STATE_WINTER_ORDER if not base_usdt else WinterSummerBot.STATE_ALIGN_WINTER
                         log.info("Start in winter")
                     else:
-                        ctx.state = WinterSummerBot.STATE_WAIT_SUMMER if not quote_usdt else WinterSummerBot.STATE_ALIGN_SUMMER
+                        self.state = WinterSummerBot.STATE_WAIT_SUMMER if not quote_usdt else WinterSummerBot.STATE_ALIGN_SUMMER
                         log.info("Start in summer")
                     yield self
 
                 # Vend les 'base' pour n'avoir que du 'quote'
-                elif ctx.state == WinterSummerBot.STATE_ALIGN_WINTER:
+                elif self.state == WinterSummerBot.STATE_ALIGN_WINTER:
                     current_price = (await client.get_symbol_ticker(symbol=symbol))["price"]
-                    order = {
-                        "newClientOrderId": generate_order_id(genertor_name),
-                        "symbol": symbol,
-                        "side": SIDE_SELL,
-                        "type": ORDER_TYPE_MARKET,
-                        "quoteOrderQty": ctx.wallet[base],
-                    }
-                    order = update_order(symbol_info, current_price, order)
-                    check_order(symbol_info, current_price, order.get('price'), order.get('quantity'))
-                    log.info(f"Try to {order['side']} {order['quoteOrderQty']} {base} at market ...")
-                    await client.create_test_order(**json_order(order))
-                    ctx.winter_order = await AddOrder.create(
-                        client,
-                        user_queue,
-                        log,
-                        order=order
-                    )
-                    ctx.state = WinterSummerBot.STATE_WAIT_ALIGN_WINTER_ORDER_FILLED
-                    yield self
-                elif ctx.state == WinterSummerBot.STATE_WAIT_ALIGN_WINTER_ORDER_FILLED:
-                    await ctx.winter_order.next()
-                    if ctx.winter_order.is_filled():
-                        del ctx.winter_order
-                        ctx.state = WinterSummerBot.STATE_WINTER_ORDER
-                        log.info(f"{ctx.wallet=}")
-                        log.info("Wait the summer...")
-                        yield self
-                    elif ctx.winter_order.is_error():
-                        # FIXME
-                        ctx.state == WinterSummerBot.STATE_ERROR
-                        yield self
-
-                # Vend les 'quote' pour n'avoir que du 'base'
-                elif ctx.state == WinterSummerBot.STATE_ALIGN_SUMMER:
-                    current_price = Decimal((await client.get_symbol_ticker(symbol=symbol))["price"])
-                    order = {
-                        "newClientOrderId": generate_order_id(genertor_name),
-                        "symbol": symbol,
-                        "side": SIDE_BUY,
-                        "type": ORDER_TYPE_MARKET,
-                        "quoteOrderQty": ctx.wallet[quote],
-                    }
-                    order = update_order(symbol_info, current_price, order)
-                    order['price'] = Decimal("1528.93")
-                    order['quantity'] = round_step_size(order['quantity'], symbol_info.lot.stepSize)
-                    log_add_order(log, order)
-                    await client.create_test_order(**json_order(order))
-                    ctx.summer_order = await AddOrder.create(
-                        client,
-                        user_queue,
-                        log,
-                        order=order
-                    )
-                    ctx.state = WinterSummerBot.STATE_WAIT_ALIGN_SUMMER_ORDER_FILLED
-                    yield self
-                elif ctx.state == WinterSummerBot.STATE_WAIT_ALIGN_SUMMER_ORDER_FILLED:
-                    order_state = await ctx.summer_order.next()
-                    if ctx.summer_order.is_filled():
-                        ctx.wallet = update_wallet(ctx.wallet, ctx.summer_order.order)
-                        log_order(log, ctx.summer_order.order)
-                        del ctx.summer_order
-                        ctx.state = WinterSummerBot.STATE_WINTER_ORDER
-                        log.info(f"{ctx.wallet=}")
-                        log.info(
-                            f"Wait the winters... ({ctx.wallet[base]:f} {base} / {ctx.wallet[quote]:f} {quote})")
-                        yield self
-                    elif ctx.summer_order.is_error():
-                        # FIXME
-                        ctx.state == WinterSummerBot.STATE_ERROR
-                        yield self
-
-                elif ctx.state == WinterSummerBot.STATE_WINTER_ORDER:
-                    interval = Client.KLINE_INTERVAL_1WEEK  # TODO: parametre ?
-                    current_price = (await client.get_symbol_ticker(symbol=symbol))["price"]
-                    #log.info(f"{current_price=}")
-                    klines = await client.get_klines(symbol=symbol, interval=interval)
-                    high = klines[-1][2]
-                    low = klines[-1][3]
-                    avg_price = (high + low) / 2
-                    # log.info(f"{avg_price=}")
-                    price = avg_price * (1 + lower_percent)
-                    price = current_price  # FIXME
-                    quantity = ctx.wallet[quote] / price
-
-                    order = {
-                        "newClientOrderId": generate_order_id(genertor_name),
-                        "symbol": symbol,
-                        "side": SIDE_BUY,
-                        "type": ORDER_TYPE_LIMIT,
-                        "timeInForce": TIME_IN_FORCE_GTC,
-                        "quantity": quantity,
-                        "price": price,
-                    }
-                    order = update_order(symbol_info, current_price, order, accept_upper=False)
-                    try:
-                        await client.create_test_order(**json_order(order))
-                        ctx.winter_order = await AddOrder.create(
+                    # quantity = self.wallet[quote]
+                    # updated_quantity = update_market_lot_size(symbol_info, quantity)
+                    # if True : # quantity != updated_quantity:
+                    #     log.info("Must sell by lot")
+                    #     order = {
+                    #         "newClientOrderId": generate_order_id(generator_name),
+                    #         "symbol": symbol,
+                    #         "side": SIDE_SELL,
+                    #         "type": ORDER_TYPE_MARKET,
+                    #         "quantity": updated_quantity,
+                    #     }
+                    #     order = update_order(symbol_info, current_price, order)
+                    #     log_order(log, order)
+                    #     await client.create_test_order(**json_order(str_order(order)))
+                    #     self.winter_order = await AddOrder.create(
+                    #         client,
+                    #         user_queue,
+                    #         log,
+                    #         order=order,
+                    #         wallet=self.wallet,
+                    #     )
+                    #     self.state = WinterSummerBot.STATE_WAIT_ALIGN_WINTER_LOOP
+                    #     yield self
+                    # else:
+                    if True:  # Vend toujours la qty dispo, sinon erreur
+                        order = {
+                            "newClientOrderId": generate_order_id(generator_name),
+                            "symbol": symbol,
+                            "side": SIDE_SELL,
+                            "type": ORDER_TYPE_MARKET,
+                            "quoteOrderQty": self.wallet[base],
+                        }
+                        order = update_order(symbol_info, current_price, order)
+                        log_add_order(log, order, prefix="For align, try to ")
+                        await client.create_test_order(**json_order(str_order(order)))
+                        self.winter_order = await AddOrder.create(
                             client,
                             user_queue,
                             log,
-                            order=order
+                            order=order,
+                            wallet=self.wallet,
                         )
-                        log_add_order(log, order)
-                        ctx.state = WinterSummerBot.STATE_WAIT_WINTER_ORDER_FILLED
+                        self.state = WinterSummerBot.STATE_WAIT_ALIGN_WINTER_ORDER_FILLED
                         yield self
-                    except BinanceAPIException as ex:
-                        if ex.code == -1013:  # OR -2011
-                            # Trading impossible. (filtre non valide. Pas assez de fond ?) # TODO
-                            log.error(ex.message)
-                        else:
-                            log.exception(ex)
-                        ctx.state = WinterSummerBot.STATE_ERROR
+                # Essaie d'achat successif par lot, pour dépasser les limites markets.
+                # elif self.state == WinterSummerBot.STATE_WAIT_ALIGN_WINTER_LOOP:
+                #     # N'arrive pas à tout vendre d'un coup, donc doit le faire petit à petit
+                #     await self.winter_order.next()
+                #     if self.winter_order.is_filled():
+                #         del self.winter_order
+                #         self.state = WinterSummerBot.STATE_WINTER_ORDER
+                #         log.info(f"{self.wallet=}")
+                #         log.info("Wait the summer...")
+                #         yield self
+                #     elif self.winter_order.is_error():
+                #         # FIXME
+                #         self.state == WinterSummerBot.STATE_ERROR
+                #         yield self
+                elif self.state == WinterSummerBot.STATE_WAIT_ALIGN_WINTER_ORDER_FILLED:
+                    await self.winter_order.next()
+                    if self.winter_order.is_filled():
+                        del self.winter_order
+                        self.state = WinterSummerBot.STATE_ALIGN_WINTER
+                        log.info(f"{self.wallet=}")
+                        log.info("Loop...")
                         yield self
-
-
-                elif ctx.state == WinterSummerBot.STATE_WAIT_WINTER_ORDER_FILLED:
-                    await ctx.winter_order.next()
-                    if ctx.winter_order.is_filled():
-                        ctx.wallet = update_wallet(ctx.wallet, ctx.winter_order.order)
-                        del ctx.winter_order
-                        ctx.state = WinterSummerBot.STATE_WAIT_SUMMER
-                        log.info(f"{ctx.wallet=}")
-                        log.info("Wait the summer...")
-                        yield self
-                    # TODO: si ordre expirer, le relancer
-                    elif ctx.winter_order.is_error():
+                    elif self.winter_order.is_error():
                         # FIXME
-                        ctx.state == WinterSummerBot.STATE_ERROR
+                        self.state == WinterSummerBot.STATE_ERROR
                         yield self
 
-                elif ctx.state == WinterSummerBot.STATE_WAIT_SUMMER:
-                    current_price = (await client.get_symbol_ticker(symbol=symbol))["price"]
-                    log.info(f"current price ={current_price}")
-                    # price = ctx.target_summer
-                    price = current_price - 100
-                    quantity = ctx.wallet[base]  # On vent tout
+                # Vend les 'quote' pour n'avoir que du 'base'
+                elif self.state == WinterSummerBot.STATE_ALIGN_SUMMER:
+                    current_price = Decimal((await client.get_symbol_ticker(symbol=symbol))["price"])
                     order = {
-                        "newClientOrderId": generate_order_id(genertor_name),
+                        "newClientOrderId": generate_order_id(generator_name),
                         "symbol": symbol,
-                        "side": SIDE_SELL,
-                        "type": ORDER_TYPE_LIMIT,
-                        "quantity": quantity,
-                        "timeInForce": TIME_IN_FORCE_GTC,
-                        "price": price,
+                        "side": SIDE_BUY,
+                        "type": ORDER_TYPE_MARKET,
+                        "quoteOrderQty": self.wallet[quote],
                     }
-                    order = update_order(symbol_info, current_price, order)
-                    # FIXME check_order(symbol_info, current_price, order['price'], order.get('quantity',None))
-                    await client.create_test_order(**json_order(order))
-                    ctx.summer_order = await AddOrder.create(
+                    order = update_order(symbol_info, current_price, order)  # FIXME
+                    # order['price'] = Decimal("1528.93")
+                    # order['quantity'] = round_step_size(order['quantity'], symbol_info.lot.stepSize)
+                    log_add_order(log, order, prefix="For align, try to ")
+                    await client.create_test_order(**json_order(str_order(order)))
+                    self.summer_order = await AddOrder.create(
                         client,
                         user_queue,
                         log,
-                        order=order
+                        order=order,
+                        wallet=self.wallet
                     )
-                    log_add_order(log, order)
-                    ctx.state = WinterSummerBot.STATE_WAIT_SUMMER_ORDER_FILLED
+                    self.state = WinterSummerBot.STATE_WAIT_ALIGN_SUMMER_ORDER_FILLED
                     yield self
 
-                elif ctx.state == WinterSummerBot.STATE_WAIT_SUMMER_ORDER_FILLED:
-                    await ctx.summer_order.next()
-                    if ctx.summer_order.is_filled():
-                        ctx.wallet = update_wallet(ctx.wallet, ctx.summer_order.order)
-                        sell_quantity_quote = Decimal(ctx.summer_order.order['executedQty'])
-                        sell_price_quote = Decimal(ctx.summer_order.order['price'])
+                elif self.state == WinterSummerBot.STATE_WAIT_ALIGN_SUMMER_ORDER_FILLED:
+                    await self.summer_order.next()
+                    if self.summer_order.is_filled():
+                        log_order(log, self.summer_order.order)
+                        del self.summer_order
+                        self.state = WinterSummerBot.STATE_WINTER_ORDER
+                        log.info(f"{self.wallet=}")
+                        log.info(
+                            f"Wait the winters... ({self.wallet[base]:f} {base} / {self.wallet[quote]:f} {quote})")
+                        yield self
+                    elif self.summer_order.is_error():
+                        # FIXME
+                        self.state == WinterSummerBot.STATE_ERROR
+                        yield self
+
+                elif self.state == WinterSummerBot.STATE_WINTER_ORDER:
+                    # Calcul la moyenne de la période précédente, et ajuste un ordre
+                    # sur cette base.
+                    current_price = (await client.get_symbol_ticker(symbol=symbol))["price"]
+                    # log.info(f"{current_price=}")
+                    avg_price = await self.get_avg_last_interval(client, interval, symbol)
+                    # log.info(f"{avg_price=}")
+                    price = avg_price * (1 + lower_percent)
+                    quantity = self.wallet[quote] / price
+
+                    # TODO: voir si le type d'ordre n'est pas take profit ou ...
+                    # TODO: vérifier si stop_lost est possible pour cette devise, sinon, simple ORDER_TYPE_LIMIT
+                    order = {
+                        "newClientOrderId": generate_order_id(generator_name),
+                        "symbol": symbol,
+                        "side": SIDE_BUY,
+                        "type": ORDER_TYPE_LIMIT,
+                        # "stopPrice": price,  # Peux être améliorer en faisant un traking de la descente
+                        "timeInForce": TIME_IN_FORCE_GTC,
+                        "quantity": quantity,
+                        "price": price,
+                    }
+                    delta = interval_to_milliseconds(interval) / 4
+                    self.next_refresh = datetime.now(timezone.utc).timestamp() * 1000 + delta
+                    order = update_order(symbol_info, current_price, order, accept_upper=False)
+                    await client.create_test_order(**json_order(str_order(order)))
+                    self.winter_order = await AddOrder.create(
+                        client,
+                        user_queue,
+                        log,
+                        order=order,
+                        wallet=self.wallet
+                    )
+                    log_add_order(log, order)
+                    self.state = WinterSummerBot.STATE_WAIT_WINTER_ORDER_FILLED
+                    yield self
+
+
+                elif self.state == WinterSummerBot.STATE_WAIT_WINTER_CANCEL_ORDER:
+                    await self.winter_order.next()
+                    if self.winter_order.is_canceled():
+                        log.info(f"Order {self.winter_order.order['clientOrderId']} canceled")
+                        self.state = WinterSummerBot.STATE_WINTER_ORDER
+                        yield self
+
+                elif self.state == WinterSummerBot.STATE_WAIT_WINTER_ORDER_FILLED:
+                    await self.winter_order.next()
+                    if self.winter_order.is_waiting():
+                        if datetime.now(timezone.utc).timestamp() * 1000 > self.next_refresh:
+                            avg_price = await self.get_avg_last_interval(client, interval, symbol)
+                            if avg_price != Decimal(self.winter_order.order['price']):
+                                self.winter_order.cancel()
+                                self.state = WinterSummerBot.STATE_WAIT_WINTER_CANCEL_ORDER
+                                yield self
+                            else:
+                                log.debug("same price, continue with the current trade")
+                            continue
+
+                    if self.winter_order.is_filled():
+                        del self.winter_order
+                        self.state = WinterSummerBot.STATE_WAIT_SUMMER
+                        log.info(f"{self.wallet=}")
+                        log.info("Wait the summer...")
+                        yield self
+                    # TODO: si ordre expirer, le relancer
+                    elif self.winter_order.is_error():
+                        # FIXME
+                        self.state == WinterSummerBot.STATE_ERROR
+                        yield self
+
+                elif self.state == WinterSummerBot.STATE_WAIT_SUMMER:
+                    current_price = (await client.get_symbol_ticker(symbol=symbol))["price"]
+                    log.info(f"current price ={current_price}")
+                    # price = self.target_summer
+                    price = current_price
+                    quantity = self.wallet[base]  # On vent tout
+                    if not quantity:
+                        log.error("Quantity is zero !")
+                        self.state = WinterSummerBot.STATE_ERROR
+                        yield self
+                    else:
+                        order = {
+                            "newClientOrderId": generate_order_id(generator_name),
+                            "symbol": symbol,
+                            "side": SIDE_SELL,
+                            "type": ORDER_TYPE_LIMIT,  # A améliorer avec un tracking vers le haut
+                            # "type": ORDER_TYPE_TAKE_PROFIT,  # A améliorer avec un tracking vers le haut
+                            "quantity": quantity,
+                            "timeInForce": TIME_IN_FORCE_GTC,
+                            "price": price,
+                            # "stopPrice": price,
+                        }
+                        order = update_order(symbol_info, current_price, order)
+                        check_order(symbol_info, current_price, order)
+                        await client.create_test_order(**json_order(str_order(order)))
+                        self.summer_order = await AddOrder.create(
+                            client,
+                            user_queue,
+                            log,
+                            order=order,
+                            wallet=self.wallet
+                        )
+                        log_add_order(log, order)
+                        self.state = WinterSummerBot.STATE_WAIT_SUMMER_ORDER_FILLED
+                        yield self
+
+                elif self.state == WinterSummerBot.STATE_WAIT_SUMMER_ORDER_FILLED:
+                    await self.summer_order.next()
+                    self.summer_order.cancel()  # FIXME
+                    if self.summer_order.is_filled():
+                        sell_quantity_quote = Decimal(self.summer_order.order['executedQty'])
+                        sell_price_quote = Decimal(self.summer_order.order['price'])
                         log.info(f"*** Sell {sell_quantity_quote} {quote} at {sell_price_quote}")
-                        del ctx.summer_order
+                        del self.summer_order
                         # TODO: calcul du gain
-                        ctx.state = WinterSummerBot.STATE_WINTER_ORDER
+                        self.state = WinterSummerBot.STATE_WINTER_ORDER
                         log.info("Wait the winter...")
                         yield self
-                    elif ctx.summer_order.is_error():
+                    elif self.summer_order.is_error():
                         # FIXME
-                        ctx.state == WinterSummerBot.STATE_ERROR
+                        self.state == WinterSummerBot.STATE_ERROR
                         yield self
                     # TODO: wait la remote au dela du top
-                elif ctx.state == WinterSummerBot.STATE_ERROR:
+                elif self.state == WinterSummerBot.STATE_ERROR:
                     log.error("State error")
-                    await sleep(60 * 60)
-                    # ou ajustement de l'ordre en cours
-                    # evt = await market_queue.get()
-                    # if evt['e'] == 'aggTrade':
-                    #     # {
-                    #     #   "e": "aggTrade",  // Event type
-                    #     #   "E": 123456789,   // Event time
-                    #     #   "s": "BNBBTC",    // Symbol
-                    #     #   "a": 12345,       // Aggregate trade ID
-                    #     #   "p": "0.001",     // Price
-                    #     #   "q": "100",       // Quantity
-                    #     #   "f": 100,         // First trade ID
-                    #     #   "l": 105,         // Last trade ID
-                    #     #   "T": 123456785,   // Trade time
-                    #     #   "m": true,        // Is the buyer the market maker?
-                    #     #   "M": true         // Ignore
-                    #     # }
-                    #     if evt['s'] == symbol:
-                    #         current_price = Decimal(evt['p'])
-                    #         if current_price >= target_summer:
-                    #             log.info(f"I want to buy in summer at {current_price}")
-                    # log.info(evt)
-                    # if evt['e'] == 'error':
-                    #     pass
-                    # save_state()
+                    return
 
-        except (ClientConnectorError, BinanceAPIException, asyncio.TimeoutError) as ex:
+        except BinanceAPIException as ex:
+            if ex.code in (-1013, -2010) and ex.message.startswith("Filter failure:"):
+                # Trading impossible. (filtre non valide.) # TODO
+                log.error(ex.message)
+                self.state = WinterSummerBot.STATE_ERROR
+                yield self
+            elif ex.code == -2011 and ex.message == "Unknown order sent.":
+                log.error(ex.message)
+                self.state = WinterSummerBot.STATE_ERROR
+                yield self
+            elif ex.code == -1021 and ex.message == 'Timestamp for this request is outside of the recvWindow.':
+                log.error(ex.message)
+                self.state = WinterSummerBot.STATE_ERROR
+                yield self
+            else:
+                log.exception("Unknown error")
+                log.exception(ex)
+                self.state = WinterSummerBot.STATE_ERROR
+                yield self
+
+
+        except (ClientConnectorError, asyncio.TimeoutError) as ex:
             log.exception("Binance communication error")
-            await sleep(MIN_RECONNECT_WAIT)
-            log.info("Try to reconnect")
-            # Restart the agent
+            if self.state != WinterSummerBot.STATE_ERROR:
+                await sleep(MIN_RECONNECT_WAIT)
+                log.info("Try to reconnect")
+            else:
+                return
 
         except Exception as ex:
             log.exception(ex)
-            sys.exit(-1)  # FIXME
+            return
+
+    async def get_avg_last_interval(self, client, interval, symbol):
+        klines = await client.get_klines(symbol=symbol, interval=interval)
+        avg_price = sum(klines[-1][1:5]) / 4
+        return avg_price
 
 
 # Bot qui utilise le generateur correspondant
@@ -469,14 +542,15 @@ async def bot(client: AsyncClient,
                                                  log,
                                                  json_generator,
                                                  socket_manager=socket_manager,
-                                                 genertor_name=bot_name,
+                                                 generator_name=bot_name,
                                                  client_account=client_account,
                                                  agent_queues=agent_queues,
                                                  conf=conf,
                                                  )
     while True:
         try:
-            await bot_generator.next()
+            if await bot_generator.next() == STOPPED:
+                return
             atomic_save_json(bot_generator, path)
         except Exception as ex:
             log.exception(ex)

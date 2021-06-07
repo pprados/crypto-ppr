@@ -7,12 +7,14 @@
   },
   {
     "winter_summer": {
+      "interval": "1m",
+//      "symbol": "XRPBNB",
       "symbol": "ETHUSDT",
       "quote_quantity": "50",
-// FIXME     "base_quantity": "1",
-      "winter": "-0%",
+//      "base_quantity": "1%",
+      "winter": "-2%",
 //      "top": 1800,
-      "summer": "0%",
+      "summer": "+2%",
     }
   }
 ]
