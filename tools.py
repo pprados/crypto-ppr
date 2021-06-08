@@ -11,6 +11,7 @@ from typing import Any, Tuple, Dict
 import jstyleson as json
 from binance import AsyncClient
 from binance.enums import ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET, SIDE_BUY, ORDER_TYPE_TAKE_PROFIT, ORDER_TYPE_LIMIT_MAKER
+from binance.exceptions import BinanceAPIException
 from binance.helpers import round_step_size
 
 
@@ -33,31 +34,23 @@ def _parse_order(order: Dict[str, Any]) -> Tuple[str, str, Decimal, Decimal]:
         quantity = Decimal(order['quantity'])
     if 'quoteOrderQty' in order:
         quote_order_qty = Decimal(order['quoteOrderQty'])
-    if side == SIDE_BUY:
-        token = base
-        other = quote
-    else:
-        token = quote
-        other = base
-    return side, token, other, quantity, quote_order_qty, price
+    return side, base, quote, quantity, quote_order_qty, price
 
 
 def _serialize(obj):
     """JSON serializer for objects not serializable by default json code"""
 
     if isinstance(obj, Decimal):
-        s = format(obj, "f")
-        if '.' not in s:
-            s = s + ".0"
-        return s.rstrip('0')
+        return float(str_d(obj))
 
     # Detecte les generators pour ne pas les sauvers
     if hasattr(obj,'ag_frame'):
         return '_generator'
     return obj.__dict__
 
-
 def json_dumps(obj: Any) -> str:
+    cop = obj.copy()
+
     return json.dumps(obj, indent=2,
                       skipkeys=True,
                       default=_serialize)
@@ -277,21 +270,25 @@ def split_symbol(symbol: str) -> Tuple[str, str]:
     m = re.match(r'(\w+)((USDT)|(ETH)|(BTC)|(USDC)|(BUSD)|(BNB))$', symbol)
     return m.group(1), m.group(2)
 
-async def to_usdt(client:AsyncClient,asset:str,val:Decimal) -> Decimal:
-    if not val:
-        return Decimal(0)
-    if asset == "USDT":
-        return val
-    if asset == "ETH":
-        return ((await client.get_symbol_ticker(symbol="ETHUSDT"))["price"] * val)
-    if asset == "BTC":
-        return ((await client.get_symbol_ticker(symbol="BTCUSDT"))["price"] * val)
-    if asset == "BUSD":
-        return ((await client.get_symbol_ticker(symbol="BUSDUSDT"))["price"] * val)
-    if asset in ["BIDR","BRL","BVND","DAI","IDRT","NGN","RUB","TRY","UAH"]: # FIXME: a tester. Inversion de la conv ?
-        return (await client.get_symbol_ticker(symbol="USDT"+asset))["price"]
-    return ((await client.get_symbol_ticker(symbol=asset+"USDT"))["price"] * val)
-
+async def to_usdt(client:AsyncClient,log:logging, asset:str,val:Decimal) -> Decimal:
+    try:
+        if not val:
+            return Decimal(0)
+        if asset in ("USDT","USDC","BUSD"):
+            return val
+        if asset == "ETH":
+            return ((await client.get_symbol_ticker(symbol="ETHUSDT"))["price"] * val)
+        if asset == "BTC":
+            return ((await client.get_symbol_ticker(symbol="BTCUSDT"))["price"] * val)
+        if asset == "BUSD":
+            return ((await client.get_symbol_ticker(symbol="BUSDUSDT"))["price"] * val)
+        if asset in ["BIDR","BRL","BVND","DAI","IDRT","NGN","RUB","TRY","UAH"]: # FIXME: a tester. Inversion de la conv ?
+            return (await client.get_symbol_ticker(symbol="USDT"+asset))["price"]
+        return ((await client.get_symbol_ticker(symbol=asset+"USDT"))["price"] * val)
+    except BinanceAPIException as ex:
+        if ex.code == -1121:
+            log.error(f"to_usdt impossible with {asset}")
+        raise
 
 
 def _dump_order(log: logging, order: Dict[str, Any], prefix: str, suffix: str = ''):
@@ -308,7 +305,7 @@ def log_add_order(log: logging, order: Dict[str, Any],prefix=None):
 
 
 def log_order(log: logging, order: Dict[str, Any]):
-    _dump_order(log, order, "*** ")
+    _dump_order(log, order, "****** ")
 
 
 def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:
@@ -318,8 +315,6 @@ def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:
     old_wallet = wallet.copy()
     if not price or price < 0:
         logging.warning(f"Unknown price {price}")
-    else:
-        price=Decimal(0)  # FIXME: ce n'est pas normal que l'API retourne cela
 
     if side == SIDE_BUY:
         wallet[base] += quantity

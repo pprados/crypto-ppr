@@ -6,6 +6,7 @@ L'état order_ctx.state fini par etre STATE_ERROR ou STATE_ORDER_FILLED.
 import asyncio
 import logging
 from asyncio import Queue, wait_for
+from decimal import Decimal
 from queue import Empty
 from typing import Dict, Any
 
@@ -86,7 +87,8 @@ class AddOrder(BotGenerator):
                 "order": kwargs['order']
             }
         self.update(init)
-        wallet = kwargs['wallet']
+        wallet:Dict[str,Decimal] = kwargs['wallet']
+        self.continue_if_partially:bool = kwargs.get("continue_if_partially")
         # Resynchronise l'état sauvegardé
         if self.state in (AddOrder.STATE_ORDER_CONFIRMED, AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET):
             # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
@@ -110,23 +112,25 @@ class AddOrder(BotGenerator):
                 self.state = AddOrder.STATE_ADD_ORDER
             elif self.state == AddOrder.STATE_ADD_ORDER:
                 # Prépare la création d'un ordre
-                await client.create_test_order(**self.order)  # FIXME: capture de l'exception
+                await client.create_test_order(**self.order)
                 # Puis essaye de l'executer
                 try:
                     order = await client.create_order(**self.order)
                 except BinanceAPIException as ex:
                     if ex.code == -2010:  # Duplicate order sent ?, ignore
                         # TODO: il faut analyser le text
-                        if ex.message == "Account has insufficient balance for requested action.":
+                        if ex.message == "Duplicate order sent.":
+                            # Retrouve l'ordre dupliqué.
+                            orders = await client.get_all_orders(symbol=symbol)
+                            order = next(
+                                filter(lambda x: x.get("clientOrderId", "") == self.order["newClientOrderId"], orders))
+                            # et continue
+
+                        elif ex.message == "Account has insufficient balance for requested action.":
                             self.state = AddOrder.STATE_ERROR
                             yield self
-                        if ex.message.startswith("Filter failure:"):
+                        elif ex.message.startswith("Filter failure:"):
                             raise
-                        # Retrouve l'ordre dupliqué. FIXME: confirmer le message à filtrer
-                        orders = await client.get_all_orders(symbol=symbol)
-                        order = next(
-                            filter(lambda x: x.get("clientOrderId", "") == self.order["newClientOrderId"], orders))
-                        # et continue
                     else:
                         raise
 
@@ -189,18 +193,22 @@ class AddOrder(BotGenerator):
                                                orderId=self['order']['orderId'])
                 # See https://binance-docs.github.io/apidocs/spot/en/#public-api-definitions
                 if order['status'] == ORDER_STATUS_FILLED:  # or ORDER_STATUS_IOY_FILLED
+                    update_wallet(wallet, order)
                     log_order(log, order)
                     self.order = order
                     self.state = AddOrder.STATE_ORDER_FILLED
-                    update_wallet(wallet, order)
                     yield self
                 if order['status'] == ORDER_STATUS_PARTIALLY_FILLED:  # or ORDER_STATUS_PARTIALLY_FILLED
-                    # FIXME: a traiter
-                    log.warning("PARTIALLY")
-                    log_order(log, order)
-                    self.order = order
-                    self.state = AddOrder.STATE_ORDER_FILLED
+                    # FIXME: Partially a traiter
                     update_wallet(wallet, order)
+                    log_order(log, order)
+                    if not self.continue_if_partially:
+                        log.warning("PARTIALLY")
+                        self.order = order
+                        self.state = AddOrder.STATE_ORDER_FILLED
+                    else:
+                        # FIXME: Partially
+                        pass
                     yield self
                 elif order['status'] == ORDER_STATUS_REJECTED:
                     log.error(f'Order {order["orderId"]} is rejected')
@@ -221,7 +229,7 @@ class AddOrder(BotGenerator):
                     assert False, f"Unknown status {order['status']}"
             elif self.state == AddOrder.STATE_ORDER_FILLED:
                 pass
-            elif self.state == AddOrder.STATE_CANCELING:  # TODO
+            elif self.state == AddOrder.STATE_CANCELING:
                 await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])
                 self.state = AddOrder.STATE_CANCELED
                 yield self

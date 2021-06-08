@@ -40,33 +40,30 @@ async def bot(client: AsyncClient,
     ms.MAX_RECONNECTS=100
 
     start = True
-    try:
-        async with ms as mscm:
-            while True:
-                if start:
-                    # Signale a tous les autres agents, que la queue user est démarrée
-                    for agent in agent_queues.values():
-                        agent.put_nowait(
-                            {
-                                "from": bot_name,
-                                "msg": "initialized"
+    async with ms as mscm:
+        while True:
+            if start:
+                # Signale a tous les autres agents, que la queue user est démarrée
+                for agent in agent_queues.values():
+                    agent.put_nowait(
+                        {
+                            "from": bot_name,
+                            "msg": "initialized"
 
-                            })
-                    start = False
-                try:
-                    # Reception d'ordre venant de l'API. Par exemple, ajout de fond, arret, etc.
-                    msg = input_queue.get_nowait() # FIXME: lecture de 2 queues en //
-                    if msg['msg'] == 'kill':
-                        log.warning("Receive kill")
-                        return
-                except QueueEmpty:
-                    pass  # Ignore
+                        })
+                start = False
+            try:
+                # Reception d'ordre venant de l'API. Par exemple, ajout de fond, arret, etc.
+                msg = input_queue.get_nowait() # FIXME: lecture de 2 queues en //
+                if msg['msg'] == 'kill':
+                    log.warning("Receive kill")
+                    return
+            except QueueEmpty:
+                pass  # Ignore
 
-                msg = await mscm.recv()
-                #await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
-                for cb in _call_back:
-                    assert msg
-                    assert cb
-                    await cb(msg['data'])
-    except Exception as ex:  # FIXME
-        log.exception(ex)
+            msg = await mscm.recv()
+            #await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
+            for cb in _call_back:
+                assert msg
+                assert cb
+                await cb(msg['data'])

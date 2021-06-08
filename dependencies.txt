@@ -1,4 +1,5 @@
-python-binance
+#python-binance
+git+git@github.com:pprados/python-binance.git@master
 jstyleson
 python-dotenv
 

@@ -16,12 +16,12 @@ class BotGenerator(dict):
     @classmethod
     async def create(cls,
                      client: AsyncClient,
-                     user_queue: Queue,
+                     agent_queue: Queue,
                      log: logging,
                      init: Dict[str, Any]={},
                      **kwargs) -> 'AddOrder':
         init.pop("_generator", None)
-        bot_generator = await cls()._start(client, user_queue, log, init, **kwargs)
+        bot_generator = await cls()._start(client, agent_queue, log, init, **kwargs)
         assert '_generator' in bot_generator.__dict__
         return bot_generator
 

@@ -1,12 +1,12 @@
+import decimal
 import logging
 import os
 import tracemalloc
-from asyncio import Queue, sleep
-from asyncio import TimeoutError, gather, get_event_loop
+from asyncio import Queue, sleep, wait, FIRST_COMPLETED
+from asyncio import TimeoutError, get_event_loop
 from importlib import import_module
 from pathlib import Path
 from typing import Dict
-import decimal
 
 from aiohttp import ClientConnectorError
 from binance import BinanceSocketManager
@@ -22,11 +22,12 @@ api_secret = os.environ["BINANCE_API_SECRET"]
 test_net = os.environ.get("BINANCE_API_TEST", "false").lower() == "true"
 
 
-
 async def main():
     log = logging.getLogger(__name__)
     client = None
     log.info("Start auto_trading")
+    finished = []
+    unfinished = []
     while True:
         agents = []
         agent_queues: Dict[str, Queue] = {}
@@ -75,17 +76,35 @@ async def main():
                                                              agent_queues,
                                                              conf)))
 
-                await gather(*agents, return_exceptions=True)  # Lance tous les agents en //
+                # Tous les résultats sont agrégé dans le retour du gather.
+                # Donc, pas possible de capturer sans attendre les autres
+                # await gather(*agents, return_exceptions=True)  # Lance tous les agents en //
+                while True:
+                    finished, unfinished = await wait(agents, return_when=FIRST_COMPLETED)
+                    for task in finished:
+                        task.result()  # Raise exception if error
+                    agents = unfinished
+                    if not unfinished:
+                        # No more coroutine
+                        return
+
         except (BinanceAPIException, ClientConnectorError, TimeoutError) as ex:
+            # FIXME: Bug en cas de perte totale du réseau, sur la résolution DNS
             # Wait and retry
-            log.exception("Binance communication error")
-            for agent in agent_queues.values:
-                agent.put_nowait(
+            ex_msg = str(ex)
+            if not ex_msg or ex_msg == 'None':
+                ex_msg = ex.__class__.__name__
+            log.error(f"Binance communication error ({ex_msg})")
+            for queue in agent_queues.values():
+                queue.put_nowait(
                     {
                         "from": "_root",
                         "msg": "kill"
                     })
+            log.info("Sleep...")
             await sleep(MIN_RECONNECT_WAIT)
+            for task in unfinished:
+                task.cancel()
             log.info("Try to reconnect")
         finally:
             if client:
@@ -95,7 +114,7 @@ async def main():
 if __name__ == "__main__":
     try:
         load_dotenv()
-        if os.environ.get("DEBUG","false")=="true":
+        if os.environ.get("DEBUG", "false") == "true":
             tracemalloc.start()
             logging.basicConfig(level=logging.DEBUG)
         else:
