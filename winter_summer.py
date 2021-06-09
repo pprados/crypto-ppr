@@ -26,8 +26,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import ClientConnectorError
 from binance import BinanceSocketManager
-from binance.enums import SIDE_BUY, ORDER_TYPE_LIMIT, TIME_IN_FORCE_GTC, SIDE_SELL, ORDER_TYPE_MARKET, \
-    KLINE_INTERVAL_1WEEK, KLINE_INTERVAL_1MONTH
+from binance.enums import *
 # Mémorise l'état de l'automate, pour permettre une reprise à froid
 from binance.helpers import *
 
@@ -409,6 +408,7 @@ class WinterSummerBot(BotGenerator):
                     #         "symbol": symbol,
                     #         "side": SIDE_BUY,
                     #         "type": ORDER_TYPE_STOP_LOSS,
+                    #         "timeInForce": TIME_IN_FORCE_GTC,
                     #         "quantity": quantity,
                     #         "stopPrice": price,
                     #     }
@@ -420,7 +420,8 @@ class WinterSummerBot(BotGenerator):
                     #         "side": SIDE_BUY,
                     #         "type": ORDER_TYPE_STOP_LOSS_LIMIT,
                     #         "quantity": quantity,
-                    #         "stopPrice": price * Decimal(1.01),  # Ajout 1% pour exposer l'ordre
+                    #         "timeInForce": TIME_IN_FORCE_GTC,
+                    #         "stopPrice": price * Decimal(0.95),  # Ajout 1% pour exposer l'ordre
                     #         "price": price
                     #     }
                     # elif ORDER_TYPE_LIMIT in symbol_info.orderTypes:

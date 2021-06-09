@@ -129,14 +129,18 @@ class AddOrder(BotGenerator):
                         elif ex.message == "Account has insufficient balance for requested action.":
                             self.state = AddOrder.STATE_ERROR
                             yield self
+                            continue
                         elif ex.message.startswith("Filter failure:"):
+                            raise
+                        elif ex.message == "Stop price would trigger immediately.":
+                            # https://dev.binance.vision/t/order-would-trigger-immediately-error/245/2
                             raise
                     else:
                         raise
 
                 # C'est bon, il est passé
-                log.debug(f'Order \'{order["clientOrderId"]}\' created')
                 self.order = order
+                log.debug(f'Order \'{self.order["clientOrderId"]}\' created')
                 self.state = AddOrder.STATE_ORDER_CONFIRMED
                 yield self
 
@@ -188,7 +192,7 @@ class AddOrder(BotGenerator):
                     self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
                     yield self
             elif self.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING:
-                log.debug("Polling get order status...")
+                log.info("Polling get order status...")
                 order = await client.get_order(symbol=self['order']['symbol'],
                                                orderId=self['order']['orderId'])
                 # See https://binance-docs.github.io/apidocs/spot/en/#public-api-definitions
@@ -221,7 +225,7 @@ class AddOrder(BotGenerator):
                     yield self
                     self.state = AddOrder.STATE_ADD_ORDER  # Retry
                 elif order['status'] == ORDER_STATUS_NEW:
-                    # FIXME: self.state = STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
+                    self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
                     yield self
                     # FIXME: si on sait que le stream est done...
                     # await sleep(POOLING_SLEEP)

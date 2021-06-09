@@ -10,7 +10,7 @@ from typing import Any, Tuple, Dict
 
 import jstyleson as json
 from binance import AsyncClient
-from binance.enums import ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET, SIDE_BUY, ORDER_TYPE_TAKE_PROFIT, ORDER_TYPE_LIMIT_MAKER
+from binance.enums import *
 from binance.exceptions import BinanceAPIException
 from binance.helpers import round_step_size
 
@@ -142,24 +142,15 @@ def update_order(wsi: Dict[str, Any], current_price: Decimal, order: Dict[str, A
      :param accept_upper True if accept to pay little more price. Else raise an exception.
      """
     side, token, other, quantity, quote_order_qty, price = _parse_order(order)
+    stopPrice = Decimal(0)
+    if 'stopPrice' in order:
+        stopPrice = Decimal(order['stopPrice'])
     assert 'quantity' in order or 'quoteOrderQty' in order
     if price and order["type"] == ORDER_TYPE_LIMIT:
-        # Ajustement éventuelle du prix
-        if price < wsi.price.minPrice:
-            price = wsi.price.minPrice
-        if price > wsi.price.maxPrice:
-            price = wsi.price.maxPrice
-        if (price - wsi.price.minPrice) % wsi.price.tickSize != 0:
-            price = price - (price - wsi.price.minPrice) % wsi.price.tickSize
-        assert (price - wsi.price.minPrice) % wsi.price.tickSize == 0
-
-        # percent
-        min_price = current_price * wsi.percent.multiplierDown
-        max_price = current_price * wsi.percent.multiplierUp
-        if price < min_price:
-            price = min_price
-        if price > max_price:
-            price = max_price
+        price = _adjuste_price(current_price, price, wsi)
+    elif order['type'] in (ORDER_TYPE_STOP_LOSS_LIMIT):
+        price = _adjuste_price(current_price,price,wsi)
+        stopPrice = _adjuste_price(current_price,stopPrice,wsi)
     elif order['type'] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER):
         if quantity:
             quantity = update_market_lot_size(wsi,quantity)
@@ -194,11 +185,32 @@ def update_order(wsi: Dict[str, Any], current_price: Decimal, order: Dict[str, A
         order['quantity'] = quantity  # round_step_size(quantity, wsi.lot.stepSize)
     if "price" in order:
         order["price"] = price
+    if "stopPrice" in order:
+        order["stopPrice"] = stopPrice
 
     # dernière vérification
     check_order(wsi, current_price, order)
 
     return order
+
+
+def _adjuste_price(current_price, price, wsi):
+    # Ajustement éventuelle du prix
+    if price < wsi.price.minPrice:
+        price = wsi.price.minPrice
+    if price > wsi.price.maxPrice:
+        price = wsi.price.maxPrice
+    if (price - wsi.price.minPrice) % wsi.price.tickSize != 0:
+        price = price - (price - wsi.price.minPrice) % wsi.price.tickSize
+    assert (price - wsi.price.minPrice) % wsi.price.tickSize == 0
+    # percent
+    min_price = current_price * wsi.percent.multiplierDown
+    max_price = current_price * wsi.percent.multiplierUp
+    if price < min_price:
+        price = min_price
+    if price > max_price:
+        price = max_price
+    return price
 
 
 def update_market_lot_size(wsi:Dict[str, Any],quantity:Decimal) -> Decimal:

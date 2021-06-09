@@ -12,14 +12,14 @@
       "symbol": "BTCUSDT",
 //      "quote_quantity": "1%",
       "base_quantity": "0.1%",
-      "winter": "-0.1%",
-      "top": 31400,
+      "winter": "-0.001%",
+//      "top": 31400,
 //      "interval_top": "1M",
 //      "history_top": "5 years ago UTC",
       // Les deux valeurs suivante permettent de partir d'un top 'proche'
       "interval_top": "1h",
       "history_top": "1 hour ago UTC",
-      "summer": "-0.1%", // Doit etre positif normalement
+      "summer": "0.01%", // Doit etre positif normalement
     }
   }
 ]

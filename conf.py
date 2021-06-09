@@ -2,4 +2,4 @@
 MIN_RECONNECT_WAIT = 10
 
 # Every STREAM_MSG_TIMEOUT try to polling (to manage missing events)
-STREAM_MSG_TIMEOUT = 10
+STREAM_MSG_TIMEOUT = 10  # FIXME: 60
