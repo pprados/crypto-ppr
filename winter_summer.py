@@ -18,6 +18,20 @@ Ce n'est pas toujours possible, à cause des limites de ventes et d'achats de la
 Pour le moment, cela génère une erreur, avant de trouver mieux.
 """
 
+"""
+TODO
+
+Trailing buy:
+- Au prix limit, place un min au prix limit, et un top a limit +5%
+- le min continue à descendre
+- le top 5% suit le min
+- lorsque le prix dépasse le min +5%, achete
+
+Take profit trailing https://help.3commas.io/en/articles/3108982-trailing-take-profit-catch-the-rise
+- On calcul le take profit en % (genre 10%)
+- on déduit la déviation (genre 2%) pour déclancher à 10%-2%
+- la on apprend (suivit du top, si baisse de déviation sous le top, vend)
+"""
 # TODO: client.get_lending_product_list() pour stacker en attendant, en été
 from asyncio import QueueEmpty
 from datetime import timezone
@@ -48,6 +62,8 @@ def _benefice(log: logging, symbol: str, wallet: Dict[str, Decimal], base_solde:
     base, quote = split_symbol(symbol)
     log.info(f"###### Result: {str_d(wallet[base] - base_solde)} {base} / {str_d(wallet[quote] - quote_solde)} {quote}")
 
+def log_wallet(log:logging, wallet:Dict[str,Decimal]) -> None:
+    log.info("wallet:"+" ".join([f"{k}={str_d(v)}" for k,v in wallet.items()]))
 
 MINIMUM_REDUCE_PRICE = Decimal("0.99")
 
@@ -112,7 +128,7 @@ class WinterSummerBot(BotGenerator):
             del init
 
             yield self
-            user_bot = agent_queues["user_stream"]
+
             user_queue = Queue()  # Création d'une queue pour les streams 'user'
             # TODO: capture des exceptions globale pour alerte
             wait_init_queue = True
@@ -212,6 +228,7 @@ class WinterSummerBot(BotGenerator):
                     # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
                     msg = user_queue.get_nowait()
                     if msg['msg'] == 'kill':
+
                         log.warning("Receive kill")
                         return
                 except QueueEmpty:
@@ -322,7 +339,7 @@ class WinterSummerBot(BotGenerator):
                     if self.winter_order.is_filled():
                         del self.winter_order
                         self.state = WinterSummerBot.STATE_ALIGN_WINTER
-                        log.info(f"{self.wallet=}")
+                        log_wallet(log,self.wallet)
                         log.info("Loop...")
                         yield self
                     elif self.winter_order.is_error():
@@ -362,7 +379,7 @@ class WinterSummerBot(BotGenerator):
                         log_order(log, self.summer_order.order)
                         del self.summer_order
                         self.state = WinterSummerBot.STATE_WINTER_ORDER
-                        log.info(f"{self.wallet=}")
+                        log_wallet(log,self.wallet)
                         log.info(
                             f"Wait the winters... ({self.wallet[base]:f} {base} / {self.wallet[quote]:f} {quote})")
                         yield self
@@ -378,9 +395,9 @@ class WinterSummerBot(BotGenerator):
                     # log.info(f"{current_price=}")
                     old_avg_price = self.avg_price if 'avg_price' in self else Decimal(0)
                     self.avg_price = await self.get_avg_last_interval(client, interval, symbol)
-                    log.info(f">>> new avg_price = {self.avg_price} for {interval} ({old_avg_price=})")
+                    log.debug(f">>> new avg_price = {self.avg_price} for {interval} ({old_avg_price=})")
                     price = self.avg_price * (1 + lower_percent)
-                    log.info(f"Je cherche à acheter lorsque le prix est < à avg_price de {lower_percent}")
+                    log.debug(f"Je cherche à acheter lorsque le prix est < à avg_price de {lower_percent}")
                     if price > self.last_price:
                         log.warning(
                             f"Official lower BUY price is upper previous SELL price "
@@ -484,7 +501,7 @@ class WinterSummerBot(BotGenerator):
                         _benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
                         del self.winter_order
                         self.state = WinterSummerBot.STATE_WAIT_SUMMER
-                        log.info(f"{self.wallet=}")
+                        log_wallet(log,self.wallet)
                         self.top_value = await self.get_top_value(client, symbol, history_top, interval_top)
                         log.info(f"new top_value={self.top_value}")
                         log.info("Wait the summer...")
@@ -567,7 +584,7 @@ class WinterSummerBot(BotGenerator):
                     await self.summer_order.next()
                     if self.summer_order.is_filled():
                         _benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
-                        log.info(f"{self.wallet=}")
+                        log_wallet(log,self.wallet)
                         del self.summer_order
                         self.state = WinterSummerBot.STATE_WINTER_ORDER
                         log.info("Wait the winter...")
@@ -589,12 +606,17 @@ class WinterSummerBot(BotGenerator):
                 yield self
             elif ex.code == -2011 and ex.message == "Unknown order sent.":
                 log.error(ex.message)
+                log.error(self.order)
                 log.exception(ex)
                 self.state = WinterSummerBot.STATE_ERROR
                 yield self
             elif ex.code == -1021 and ex.message == 'Timestamp for this request is outside of the recvWindow.':
                 log.error(ex.message)
-                self.state = WinterSummerBot.STATE_ERROR
+                # self.state = WinterSummerBot.STATE_ERROR
+                yield self
+            elif ex.code == -1021 and ex.message == 'Timestamp for this request was 1000ms ahead of the server\'s time.':
+                log.error(ex.message)
+                # self.state = WinterSummerBot.STATE_ERROR
                 yield self
             else:
                 log.exception("Unknown error")

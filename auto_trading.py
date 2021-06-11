@@ -40,8 +40,15 @@ async def main():
             # initialise the client
             # {"verify": False, "timeout": 20}
             # client = await AsyncClient.create(api_key, api_secret, testnet=test_net)
-            client = await TypingClient.create(api_key, api_secret, testnet=test_net)
-            socket_manager = BinanceSocketManager(client._delegate, user_timeout=60)
+            while True:
+                client = await TypingClient.create(api_key, api_secret, testnet=test_net)
+                socket_manager = BinanceSocketManager(client._delegate, user_timeout=60)
+                try:
+                    await client.ping()
+                    break
+                except BinanceAPIException:
+                    log.warning("Ping fail")
+                    await sleep(MIN_RECONNECT_WAIT)
 
             # client = Client(api_key, api_secret, testnet=test_net)
 
@@ -120,6 +127,16 @@ if __name__ == "__main__":
                 logging.basicConfig(level=logging.DEBUG)
             else:
                 logging.basicConfig(level=logging.INFO)
+
+            # create file handler which logs even debug messages
+            fh = logging.FileHandler('ctx/auto_trading.log')
+            fh.setLevel(logging.INFO)
+            # create formatter and add it to the handlers
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            fh.setFormatter(formatter)
+            # add the handlers to the root logger
+            logging.getLogger().addHandler(fh)
+
             decimal.getcontext().prec = 20
             loop = get_event_loop()
             loop.run_until_complete(main())

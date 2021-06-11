@@ -192,7 +192,7 @@ class AddOrder(BotGenerator):
                     self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
                     yield self
             elif self.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING:
-                log.info("Polling get order status...")
+                # log.info("Polling get order status...")
                 order = await client.get_order(symbol=self['order']['symbol'],
                                                orderId=self['order']['orderId'])
                 # See https://binance-docs.github.io/apidocs/spot/en/#public-api-definitions
@@ -204,6 +204,7 @@ class AddOrder(BotGenerator):
                     yield self
                 if order['status'] == ORDER_STATUS_PARTIALLY_FILLED:  # or ORDER_STATUS_PARTIALLY_FILLED
                     # FIXME: Partially a traiter
+                    log_order(log,order)
                     update_wallet(wallet, order)
                     log_order(log, order)
                     if not self.continue_if_partially:
@@ -234,7 +235,14 @@ class AddOrder(BotGenerator):
             elif self.state == AddOrder.STATE_ORDER_FILLED:
                 pass
             elif self.state == AddOrder.STATE_CANCELING:
-                await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])
+                try:
+                    await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])
+                except BinanceAPIException as ex:
+                    if ex.code == -2011 and ex.message == "Unknown order sent.":
+                        pass # Ignore
+                    else:
+                        raise
+
                 self.state = AddOrder.STATE_CANCELED
                 yield self
             elif self.state == AddOrder.STATE_CANCELED:
