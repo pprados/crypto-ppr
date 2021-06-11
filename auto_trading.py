@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from TypingClient import TypingClient
 from conf import MIN_RECONNECT_WAIT
+from simulate_client import SimulateClient, SimulateBinanceSocketManager
 from tools import atomic_load_json
 
 api_key = os.environ["BINANCE_API_KEY"]
@@ -41,8 +42,11 @@ async def main():
             # {"verify": False, "timeout": 20}
             # client = await AsyncClient.create(api_key, api_secret, testnet=test_net)
             while True:
-                client = await TypingClient.create(api_key, api_secret, testnet=test_net)
-                socket_manager = BinanceSocketManager(client._delegate, user_timeout=60)
+                # FIXME
+                # client = await TypingClient.create(api_key, api_secret, testnet=test_net)
+                # socket_manager = BinanceSocketManager(client._delegate, user_timeout=60)
+                client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+                socket_manager = SimulateBinanceSocketManager(client._delegate)
                 try:
                     await client.ping()
                     break

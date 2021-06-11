@@ -48,8 +48,9 @@ from add_order import *
 from bot_generator import STOPPED
 from multiplex_stream import add_multiplex_socket
 from tools import atomic_load_json, generate_order_id, wait_queue_init, update_order, split_symbol, \
-    atomic_save_json, check_order, log_order, json_order, log_add_order, to_usdt, str_order, str_d
+    atomic_save_json, check_order, log_order, json_order, log_add_order, to_usdt, str_order, str_d, Wallet
 
+from simulate_client import *
 
 # TODO: a voir dans streams
 #     MAX_RECONNECTS = 5
@@ -62,8 +63,10 @@ def _benefice(log: logging, symbol: str, wallet: Dict[str, Decimal], base_solde:
     base, quote = split_symbol(symbol)
     log.info(f"###### Result: {str_d(wallet[base] - base_solde)} {base} / {str_d(wallet[quote] - quote_solde)} {quote}")
 
-def log_wallet(log:logging, wallet:Dict[str,Decimal]) -> None:
-    log.info("wallet:"+" ".join([f"{k}={str_d(v)}" for k,v in wallet.items()]))
+
+def log_wallet(log: logging, wallet: Wallet) -> None:
+    log.info("wallet:" + " ".join([f"{k}={str_d(v)}" for k, v in wallet.items()]))
+
 
 MINIMUM_REDUCE_PRICE = Decimal("0.99")
 
@@ -91,7 +94,7 @@ class WinterSummerBot(BotGenerator):
                      client: AsyncClient,
                      agent_queue: Queue,
                      log: logging,
-                     init: Dict[str, Any],
+                     init: Dict[str, str],
                      **kwargs) -> 'WinterSummerBot':
         self._generator = self.generator(client,
                                          agent_queue,
@@ -110,12 +113,12 @@ class WinterSummerBot(BotGenerator):
                         client: AsyncClient,
                         bot_queue: Queue,
                         log: logging,
-                        init: Dict[str, Any],  # Initial context
+                        init: Dict[str, str],  # Initial context
                         socket_manager: BinanceSocketManager,
                         client_account: Dict[str, Any],
                         generator_name: str,
                         agent_queues: Dict[str, Queue],  # All agent queues
-                        conf: Dict[str, Any]) -> None:
+                        conf: Dict[str, str]) -> None:
         try:
             if not init:
                 # Premier départ
@@ -217,10 +220,6 @@ class WinterSummerBot(BotGenerator):
                 await wait_queue_init(bot_queue)
                 wait_init_queue = False
 
-
-
-
-
             # Finite state machine
             # C'est ici que le bot travaille sans fin, en sauvant sont état à chaque transition
             while True:
@@ -228,7 +227,6 @@ class WinterSummerBot(BotGenerator):
                     # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
                     msg = user_queue.get_nowait()
                     if msg['msg'] == 'kill':
-
                         log.warning("Receive kill")
                         return
                 except QueueEmpty:
@@ -339,7 +337,7 @@ class WinterSummerBot(BotGenerator):
                     if self.winter_order.is_filled():
                         del self.winter_order
                         self.state = WinterSummerBot.STATE_ALIGN_WINTER
-                        log_wallet(log,self.wallet)
+                        log_wallet(log, self.wallet)
                         log.info("Loop...")
                         yield self
                     elif self.winter_order.is_error():
@@ -379,7 +377,7 @@ class WinterSummerBot(BotGenerator):
                         log_order(log, self.summer_order.order)
                         del self.summer_order
                         self.state = WinterSummerBot.STATE_WINTER_ORDER
-                        log_wallet(log,self.wallet)
+                        log_wallet(log, self.wallet)
                         log.info(
                             f"Wait the winters... ({self.wallet[base]:f} {base} / {self.wallet[quote]:f} {quote})")
                         yield self
@@ -501,7 +499,7 @@ class WinterSummerBot(BotGenerator):
                         _benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
                         del self.winter_order
                         self.state = WinterSummerBot.STATE_WAIT_SUMMER
-                        log_wallet(log,self.wallet)
+                        log_wallet(log, self.wallet)
                         self.top_value = await self.get_top_value(client, symbol, history_top, interval_top)
                         log.info(f"new top_value={self.top_value}")
                         log.info("Wait the summer...")
@@ -584,7 +582,7 @@ class WinterSummerBot(BotGenerator):
                     await self.summer_order.next()
                     if self.summer_order.is_filled():
                         _benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
-                        log_wallet(log,self.wallet)
+                        log_wallet(log, self.wallet)
                         del self.summer_order
                         self.state = WinterSummerBot.STATE_WINTER_ORDER
                         log.info("Wait the winter...")
@@ -626,12 +624,12 @@ class WinterSummerBot(BotGenerator):
 
 
         except (ClientConnectorError, asyncio.TimeoutError, aiohttp.ClientOSError) as ex:
-            self. state = WinterSummerBot.STATE_ERROR
+            self.state = WinterSummerBot.STATE_ERROR
             # Attention, pas de sauvegarde.
             raise
 
-    async def get_top_value(self, client: AsyncClient, symbol: str, history: str, interval_top:str):
-        klines = await client.get_historical_klines(symbol, interval_top,history)
+    async def get_top_value(self, client: AsyncClient, symbol: str, history: str, interval_top: str):
+        klines = await client.get_historical_klines(symbol, interval_top, history)
         top_value = max([Decimal(kline[2]) for kline in  # Top déduit de l'historique
                          klines])
         return top_value
@@ -648,7 +646,7 @@ async def bot(client: AsyncClient,
               client_account: Dict[str, Any],
               bot_name: str,
               agent_queues: Dict[str, Queue],
-              conf: Dict[str, Any]):
+              conf: Dict[str, str]):
     path = Path("ctx", bot_name + ".json")
 
     log = logging.getLogger(bot_name)

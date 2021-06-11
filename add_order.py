@@ -45,7 +45,7 @@ class AddOrder(BotGenerator):
                      client: AsyncClient,
                      user_queue: Queue,
                      log: logging,
-                     init: Dict[str, Any],
+                     init: Dict[str, str],
                      **kwargs) -> 'AddOrder':
         self._generator = self.generator(client,
                                          user_queue,
@@ -79,7 +79,7 @@ class AddOrder(BotGenerator):
                         client,
                         user_queue: Queue,
                         log: logging,
-                        init: Dict[str, Any],
+                        init: Dict[str, str],
                         **kwargs):
         if not init:
             init = {
@@ -141,7 +141,7 @@ class AddOrder(BotGenerator):
                 # C'est bon, il est passé
                 self.order = order
                 log.debug(f'Order \'{self.order["clientOrderId"]}\' created')
-                self.state = AddOrder.STATE_ORDER_CONFIRMED
+                self.state = AddOrder.STATE_WAIT_ORDER
                 yield self
 
             elif self.state == AddOrder.STATE_WAIT_ORDER:
@@ -151,7 +151,7 @@ class AddOrder(BotGenerator):
                 pending_order = list(
                     filter(lambda x: x.get("newClientOrderId", "") == self.order["newClientOrderId"], orders))
                 if not pending_order:
-                    # Finalement, l'ordre n'est pas passé, on le relance
+                    # Finalement, l'ordre n'est pas passé ou est déjà validé, on le relance ?
                     log.info(f'Resend order {self.order["newClientOrderId"]}...')
                     order = await client.create_order(**self.order)
                     log.debug(f'Order {order["clientOrderId"]} created')
@@ -193,8 +193,8 @@ class AddOrder(BotGenerator):
                     yield self
             elif self.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING:
                 # log.info("Polling get order status...")
-                order = await client.get_order(symbol=self['order']['symbol'],
-                                               orderId=self['order']['orderId'])
+                order = await client.get_order(symbol=self.order['symbol'],
+                                               orderId=self.order['orderId'])
                 # See https://binance-docs.github.io/apidocs/spot/en/#public-api-definitions
                 if order['status'] == ORDER_STATUS_FILLED:  # or ORDER_STATUS_IOY_FILLED
                     update_wallet(wallet, order)

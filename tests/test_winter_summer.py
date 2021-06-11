@@ -1,0 +1,74 @@
+import asyncio
+import logging
+import os
+from asyncio import Queue
+from decimal import Decimal
+
+from binance import BinanceSocketManager
+
+from bot_generator import STOPPED
+from winter_summer import bot as winter_summer_bot, WinterSummerBot
+from simulate_client import SimulateClient, SimulateBinanceSocketManager, SimulationUserStream
+
+api_key = os.environ["BINANCE_API_KEY"]
+api_secret = os.environ["BINANCE_API_SECRET"]
+test_net = True
+
+def test_winter_summer():
+
+    async def inf_loop():
+        client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+        socket_manager = SimulateBinanceSocketManager(BinanceSocketManager(client._delegate, user_timeout=60))
+        client_account = await client.get_account()
+
+        bot_name = "Test-Winter-summer"
+        agent_queues = {
+            "user_stream": SimulationUserStream(),
+            bot_name: Queue(),
+                        }
+        conf = {
+            "interval": "5m",
+            "symbol": "BTCUSDT",
+            "base_quantity": "100%",
+            "winter": "-0.0001%",
+            "interval_top": "1h",
+            "history_top": "1 hour ago UTC",
+            "summer": "0.0001%",
+        }
+
+        agent_queues[bot_name].put_nowait({"from":"user_stream", "msg":"initialized"})
+        agent_queues[bot_name].put_nowait({"from":"multiplex_stream", "msg":"initialized"})
+        # Execution du bot()
+        # while True:
+        #     await winter_summer_bot(client,
+        #                                                  socket_manager,
+        #                                                  client_account,
+        #                                                  agent_name,
+        #                                                  agent_queues,
+        #                                                  conf)
+
+        # Execution du generator
+        bot_queue = agent_queues[bot_name]
+        json_generator = {} # Initial state
+        log = logging.getLogger("TEST")
+        bot_generator = await WinterSummerBot.create(client,
+                                                     bot_queue,
+                                                     log,
+                                                     json_generator,
+                                                     socket_manager=socket_manager,
+                                                     generator_name=bot_name,
+                                                     client_account=client_account,
+                                                     agent_queues=agent_queues,
+                                                     conf=conf,
+                                                     )
+        await bot_generator.next()  # Step 1
+        assert bot_generator.state == WinterSummerBot.STATE_WAIT_SUMMER
+        while True:
+            x= await bot_generator.next()  # FIXME: le x ne semble pas passer à STOPPED or ERROR
+            if x == STOPPED:
+                break
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(inf_loop())
+    finally:
+        loop.close()

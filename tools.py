@@ -6,7 +6,7 @@ from decimal import Decimal
 from json import JSONDecodeError
 from pathlib import Path
 from random import randint
-from typing import Any, Tuple, Dict
+from typing import Any, Tuple, Dict, Union
 
 import jstyleson as json
 from binance import AsyncClient
@@ -14,6 +14,9 @@ from binance.enums import *
 from binance.exceptions import BinanceAPIException
 from binance.helpers import round_step_size
 
+Order_attr = Union[str,float,Decimal,int,bool]
+Order = Dict[str,Order_attr]
+Wallet = Dict[str,Decimal]
 
 def _parse_order(order: Dict[str, Any]) -> Tuple[str, str, Decimal, Decimal]:
     base, quote = split_symbol(order['symbol'])

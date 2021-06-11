@@ -13,7 +13,7 @@
 //      "quote_quantity": "1%",
       "base_quantity": "0.1%",
       "winter": "-0.0001%",
-      "top": 36000,
+//      "top": 36000,
 //      "interval_top": "1M",
 //      "history_top": "5 years ago UTC",
       // Les deux valeurs suivante permettent de partir d'un top 'proche'
