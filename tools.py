@@ -337,5 +337,5 @@ def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:
     else:
         wallet[base] -= quantity
         wallet[quote] += quantity * price
-    assert wallet[base] >= 0
-    assert wallet[quote] >= 0
+    # FIXME assert wallet[base] >= 0
+    # FIXME assert wallet[quote] >= 0

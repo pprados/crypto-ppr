@@ -9,6 +9,7 @@ Parametres:
       "base_quantity": "0.1%", # La quantité de 'base' à utiliser (ou zéro)
       "quote_quantity": "0.1%", # La quantité de 'quote' à utiliser (ou zéro mais l'un des deux)
       "interval": "1w" # Moyenne entre top et bottom de la période précédente comme point de d'analyse
+      "interval_top": "1w" (optional) # Interval pour trouver le top précédant
       "winter": "-30%", # Si le marché tombe de 'winter' % sur la période, alors achète
       "summer": "2%" # Si le marché remonte au dessus du top, de 'summer' %, alors vend
 }
@@ -59,6 +60,7 @@ from simulate_client import *
 #     TIMEOUT = 10
 #     NO_MESSAGE_RECONNECT_TIMEOUT = 60
 
+COEF_SLEEP=0
 def _benefice(log: logging, symbol: str, wallet: Dict[str, Decimal], base_solde: Decimal, quote_solde: Decimal) -> None:
     base, quote = split_symbol(symbol)
     log.info(f"###### Result: {str_d(wallet[base] - base_solde)} {base} / {str_d(wallet[quote] - quote_solde)} {quote}")
@@ -74,7 +76,7 @@ MINIMUM_REDUCE_PRICE = Decimal("0.99")
 # Utilisation d'un generateur pour pouvoir utiliser la stratégie
 # dans une autre.
 class WinterSummerBot(BotGenerator):
-    POOLING_SLEEP = 2
+    POOLING_SLEEP = 2 * COEF_SLEEP
 
     STATE_INIT = "init"
     STATE_ALIGN_WINTER = "align_winter"
@@ -144,8 +146,8 @@ class WinterSummerBot(BotGenerator):
             lower_percent = Decimal(conf['winter'].strip('%')) / 100
             upper_percent = Decimal(conf['summer'].strip('%')) / 100
             interval = conf.get("interval", KLINE_INTERVAL_1WEEK)
-            interval_top = conf.get("interval_top", KLINE_INTERVAL_1MONTH)
-            history_top = conf.get("history_top", "5 years ago UTC")
+            interval_top = conf.get("interval_top", KLINE_INTERVAL_1WEEK)
+            history_top = conf.get("history_top", "5 years before UTC")
             if 'top' in conf:
                 self.top_value = Decimal(conf["top"])  # Top fixé
             else:
@@ -636,6 +638,7 @@ class WinterSummerBot(BotGenerator):
 
     async def get_avg_last_interval(self, client, interval, symbol):
         klines = await client.get_klines(symbol=symbol, interval=interval)
+        assert klines
         return sum(klines[-1][1:5]) / 4
 
 

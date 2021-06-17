@@ -6,10 +6,10 @@ Pour le moment, la simulation de génère pas d'event. Il faut poller.
 import logging
 import random
 import sys
-from asyncio import sleep
-from datetime import datetime, time
+from asyncio import Queue
+from datetime import datetime
 from decimal import Decimal
-from typing import Dict, Any, Optional, List, Tuple, Iterable
+from typing import Dict, Any, Optional, List, Tuple, Iterable, Generator
 
 from binance import AsyncClient, BinanceSocketManager
 from binance.enums import HistoricalKlinesType, ORDER_TYPE_MARKET, SIDE_SELL, ORDER_TYPE_LIMIT, SIDE_BUY, \
@@ -18,36 +18,161 @@ from binance.helpers import interval_to_milliseconds, date_to_milliseconds
 
 from TypingClient import TypingClient
 from delegate_attribut import custom_inherit
+from download_history import download_historical_values
 from tools import split_symbol, str_d, Order, Order_attr
 
 log = logging.getLogger(__name__)
 
+def to_str_date(timestamp:int) -> str:
+    return datetime.utcfromtimestamp(timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
 
 def to_datetime(binance_datetime: str):
     return datetime.fromtimestamp(int(binance_datetime) / 1000)
 
 
-random.seed(0)  # Fixe le seed
+class SimulateFromHistory():
+    GARDE_PERIOD=10
+    def __init__(self, symbol: str):  # TODO: debut et fin de simulation
+        self.symbol = symbol
+        self._datas = download_historical_values(symbol, "1d")
+        self._now = self._datas.iloc[SimulateFromHistory.GARDE_PERIOD]['unix'] * 1000  # En millisecondes (et non en secondes)
+
+    def add_order(self, ts: int, val: Decimal, vol: Decimal):
+        pass
+
+    def generate_values(self) -> Generator[Decimal, Any, Any]:
+        for _, row in self._datas[SimulateFromHistory.GARDE_PERIOD:].iterrows():
+            self._now = row['unix'] * 1000
+            yield Decimal(row['open'])
+            self._now = row['unix'] * 1000 + 1
+            # High et low dans un ordre aléatoire, mais répétable
+            yield Decimal(row['high']) if int(row['open']) % 2 == 0 else Decimal(row['low'])
+            self._now = row['unix'] * 1000 + 2
+            yield Decimal(row['low']) if int(row['open']) % 2 == 0 else Decimal(row['high'])
+            self._now = row['unix'] * 1000 + 3
+            yield Decimal(row['close'])
+
+    @property
+    def now(self):
+        return self._now
+
+    #         :param symbol: required
+    #         :type symbol: str
+    #         :param interval: -
+    #         :type interval: str
+    #         :param limit: - Default 500; max 500.
+    #         :type limit: int
+    #         :param startTime:
+    #         :type startTime: int
+    #         :param endTime:
+    #         :type endTime: int
+    def get_klines(self,
+                   symbol:str,
+                   interval:str,
+                   startTime:Optional[int]=None,
+                   endTime:Optional[int]=None,
+                   limit:int=500) -> List[List[Any]]:
+        return self.get_historical_klines(interval=interval,
+                                   start_str=to_str_date(startTime) if startTime else "now",
+                                   end_str=to_str_date(endTime) if endTime else None,
+                                   limit=limit)
+
+    def get_historical_klines(self,
+                              interval: str,
+                              start_str: str,
+                              end_str: Optional[str] = None,
+                              limit: int = 500,
+                              klines_type: HistoricalKlinesType = HistoricalKlinesType.SPOT) -> List[List[Any]]:
+        """ Recalcul les klines à parti d'un historique. """
+        now = date_to_milliseconds("now UTC")
+        delta_now = now - self._now
+
+        history = date_to_milliseconds(start_str) - delta_now
+
+        interval_milli = interval_to_milliseconds(interval)
+        assert interval_milli, f"Interval non valide ({interval})"
+
+        result = [[row["unix"],
+                   Decimal(row["open"]),
+                   Decimal(row["high"]),
+                   Decimal(row["low"]),
+                   Decimal(row["close"]),
+                   row["unix"], 1, 1, 1, 1, ""]
+                  for _, row
+                  in self._datas[self._datas["unix"].between(history/1000, (history + interval_milli)/1000)].iterrows()]
+        if len(result) > limit:
+            result = result[:limit]
+        # TODO: conversion d'echelle > uniquement ?
+        # open_time = history
+        # while True:
+        #     low = sys.float_info.max
+        #     high = Decimal(0)
+        #     open = Decimal(0)
+        #     number_of_trade = 0
+        #     taker_buy_base_asset_volume = 0
+        #     first = False
+        #     kl_close = Decimal(0)
+        #     for _,(ts, _, _, kl_open, kl_high, kl_low, kl_close, kl_vol_base,kl_vol_quote,_) in \
+        #             self._datas[self._datas["unix"].between(history, (history + interval))].iterrows():
+        #         if not first:
+        #             open = kl_open
+        #             first = True
+        #
+        #         low = min(low, kl_low)
+        #         high = max(high, kl_high)
+        #         number_of_trade += 1
+        #         taker_buy_base_asset_volume += 1  # FIXME vol
+        #     close = kl_close
+        #     close_time = open_time  # FIXME: ce n'est pas correct
+        #     quote_asset_volume = "0"  # FIXME
+        #     taker_buy_quote_asset_volume = "0"  # FIXME
+        #     result.append([open_time, open, high, low, close, close_time,
+        #                    quote_asset_volume, number_of_trade,
+        #                    taker_buy_base_asset_volume, taker_buy_quote_asset_volume, "Ignore"])
+        #     open_time += interval
+        #     if open_time > now or len(result) > limit:
+        #         break
+        return result
 
 
 class SimulateRandomValues():
     """ Simulation via un génerator aléatoire dans un range. """
-    def __init__(self,min:int=30000,max:int=50000,step:int=1000):
-        self._min= min
+
+    def __init__(self, socket_manager: 'SimulateBinanceSocketManager',
+                 symbol: str,
+                 min: int = 30000,
+                 max: int = 50000,
+                 step: int = 1000):
+        self._socket_manager = socket_manager
+        self.symbol = symbol
+        self._min = min
         self._max = max
         self._step = step
         history = date_to_milliseconds("1 day ago UTC")
         interval = interval_to_milliseconds("30m")
         now = date_to_milliseconds("now")
         iterator = self.generate_values()
-        self._history = [(dt, next(iterator),Decimal(1)) for dt in range(history, now, interval)]
+        self._is_started = False
+        self._history = [(dt, next(iterator), Decimal(1)) for dt in range(history, now, interval)]
+        self._is_started = True
 
-    def add_order(self, ts:int, val:Decimal,vol:Decimal):
-        self._history.append([ts,val,vol])
+    @property
+    def now(self):
+        return date_to_milliseconds("now")
 
-    def generate_values(self):
+    def add_order(self, ts: int, val: Decimal, vol: Decimal):
+        self._history.append([ts, val, vol])
+
+    def _gen_value(self) -> Decimal:
+        if self._is_started:
+            self._socket_manager.add_multicast_event({
+                # FIXME
+            })
+        return Decimal(random.randrange(self._min, self._max, self._step))
+
+    def generate_values(self) -> Generator[Decimal, Any, Any]:
         # Generateur sans fin
-        return (Decimal(random.randrange(self._min, self._max, self._step)) for i in iter(int, 1))
+        return (self._gen_value() for i in iter(int, 1))
 
     # [
     #     1499040000000,      // Open time
@@ -115,6 +240,46 @@ class SimulateRandomValues():
 # et les dates en Date.
 # Cette classe va évoluer au fur et à mesure des besoins.
 class SimulateClient(TypingClient):
+    log_current=0
+    @classmethod
+    async def create(
+            cls,
+            api_key: Optional[str] = None,
+            api_secret: Optional[str] = None,
+            **kw
+    ):
+        return SimulateClient(await AsyncClient.create(api_key, api_secret, **kw))
+
+    def __init__(self, delegate: AsyncClient):
+        super().__init__(delegate)
+        self._orders = []
+        self._order_id = 0
+        self._account = {
+            "makerCommission": 0,
+            "takerCommission": 0,
+            "buyerCommission": 0,
+            "sellerCommission": 0,
+            "canTrade": True,
+            "canWithdraw": False,
+            "canDeposit": False,
+            "updateTime": 0,
+            "accountType": "SPOT",
+            "balances": [
+                {"asset": "BNB", "free": Decimal("1000"), "locked": Decimal(0)},
+                {"asset": "BTC", "free": Decimal("1"), "locked": Decimal(0)},
+                {"asset": "BUSD", "free": Decimal("1000"), "locked": Decimal(0)},
+                {"asset": "ETH", "free": Decimal("1000"), "locked": Decimal(0)},
+                {"asset": "LTC", "free": Decimal("0.1"), "locked": Decimal(0)},
+                {"asset": "TRX", "free": Decimal("1000"), "locked": Decimal(0)},
+                {"asset": "USDT", "free": Decimal("1000"), "locked": Decimal(0)},
+                {"asset": "XRP", "free": Decimal("1000"), "locked": Decimal(0)},
+            ],
+            "permissions": ["SPOT"]
+        }
+        self._socket_manager = SimulateBinanceSocketManager(self._delegate)
+        # FIXME self._simulate_values = SimulateRandomValues(self._socket_manager)
+        self._simulate_values = SimulateFromHistory(symbol="BTCUSDT")
+        self._values = self._simulate_values.generate_values()
 
     def _split_balance(self, symbol) -> Tuple[Dict[str, Order_attr], Dict[str, Order_attr]]:
         """ Récupère les bases des 2 devices """
@@ -133,7 +298,13 @@ class SimulateClient(TypingClient):
             order["executedQty"] = str_d(quantity)
             order["status"] = ORDER_STATUS_FILLED
             del order["newClientOrderId"]
-            self._simulate_values.add_order(order["transactTime"],current_price,quantity )
+            self._simulate_values.add_order(order["transactTime"], current_price, quantity)
+            self._socket_manager.add_user_socket_event({
+                'e': "executionReport",
+                's': order["symbol"],
+                'i': order["orderId"],
+                'X': order["status"]
+            })
 
         elif order["type"] == ORDER_TYPE_LIMIT:
             # TODO: timeInForce
@@ -146,6 +317,12 @@ class SimulateClient(TypingClient):
                 balance_base["locked"] -= quantity
                 # Plus nécessaire, c'est vendu balance_base["free"] += quantity
                 balance_quote["free"] += quantity * current_price
+                self._socket_manager.add_user_socket_event({
+                    'e': "executionReport",
+                    's': order["symbol"],
+                    'i': order["orderId"],
+                    'X': order["status"]
+                })
                 self._simulate_values.add_order(order["transactTime"], current_price, quantity)
                 # del order["newClientOrderId"]
             elif order["side"] == SIDE_BUY and current_price <= limit:
@@ -158,6 +335,12 @@ class SimulateClient(TypingClient):
                 balance_quote["free"] -= quantity * current_price
                 balance_base["free"] += quantity
                 # del order["newClientOrderId"]
+                self._socket_manager.add_user_socket_event({  # TODO: vérifier la capture du message, puis simplifier
+                    'e': "executionReport",
+                    's': order["symbol"],
+                    'i': order["orderId"],
+                    'X': order["status"]
+                })
                 self._simulate_values.add_order(order["transactTime"], current_price, quantity)  # FIXME: + ou - ?
 
         else:
@@ -191,7 +374,10 @@ class SimulateClient(TypingClient):
 
         # Avance d'une valeur
         current_value = next(self._values)
-        log.warning(f"current={current_value}")
+        SimulateClient.log_current += 1
+        if SimulateClient.log_current % 100 == 0:
+            str_now = to_str_date(self._simulate_values.now)
+            log.info(f"{str_now} current={current_value}")
 
         # Analyse des ordres à traiter
         for order in filter(lambda order: order["status"] in (ORDER_STATUS_NEW), self._orders):
@@ -199,44 +385,6 @@ class SimulateClient(TypingClient):
                 self.apply_order(current_value, order)
             elif order["type"] == ORDER_TYPE_LIMIT:
                 self.apply_order(current_value, order)
-
-    @classmethod
-    async def create(
-            cls,
-            api_key: Optional[str] = None,
-            api_secret: Optional[str] = None,
-            **kw
-    ):
-        return SimulateClient(await AsyncClient.create(api_key, api_secret, **kw))
-
-    def __init__(self, delegate: AsyncClient):
-        super().__init__(delegate)
-        self._simulate_values = SimulateRandomValues()
-        self._values = self._simulate_values.generate_values()
-        self._orders = []
-        self._order_id = 0
-        self._account = {
-            "makerCommission": 0,
-            "takerCommission": 0,
-            "buyerCommission": 0,
-            "sellerCommission": 0,
-            "canTrade": True,
-            "canWithdraw": False,
-            "canDeposit": False,
-            "updateTime": 0,
-            "accountType": "SPOT",
-            "balances": [
-                {"asset": "BNB", "free": Decimal("1000"), "locked": Decimal(0)},
-                {"asset": "BTC", "free": Decimal("1"), "locked": Decimal(0)},
-                {"asset": "BUSD", "free": Decimal("1000"), "locked": Decimal(0)},
-                {"asset": "ETH", "free": Decimal("1000"), "locked": Decimal(0)},
-                {"asset": "LTC", "free": Decimal("0.1"), "locked": Decimal(0)},
-                {"asset": "TRX", "free": Decimal("1000"), "locked": Decimal(0)},
-                {"asset": "USDT", "free": Decimal("1000"), "locked": Decimal(0)},
-                {"asset": "XRP", "free": Decimal("1000"), "locked": Decimal(0)},
-            ],
-            "permissions": ["SPOT"]
-        }
 
     async def get_recent_trades(self, **kwargs) -> List[Dict[str, Any]]:
         result = await super().get_recent_trades(**kwargs)
@@ -267,8 +415,16 @@ class SimulateClient(TypingClient):
         return result
 
     async def get_symbol_ticker(self, **params):
-        result = await super().get_symbol_ticker(**params)
-        return result
+        if params["symbol"] == self._simulate_values.symbol:
+            result = next(self._values)
+            await self.tick()
+            return \
+                {
+                    "symbol": params["symbol"],
+                    "price": result
+                }
+        else:
+            return super().get_symbol_ticker(**params)
 
     async def create_test_order(self, **params):
         """Test new order creation and signature/recvWindow long. Creates and validates a new order but does not send it into the matching engine.
@@ -375,25 +531,42 @@ class SimulateClient(TypingClient):
         await self.tick()
         return new_order
 
+    async def get_klines(self, **params) -> Dict:
+        return self._simulate_values.get_klines(**params)
+
     async def get_historical_klines(self, symbol, interval, start_str, end_str=None, limit=500,
                                     klines_type: HistoricalKlinesType = HistoricalKlinesType.SPOT):
         return self._simulate_values.get_historical_klines(interval, start_str, end_str, limit, klines_type)
-        # return await super().get_historical_klines(symbol, interval, start_str, end_str, limit, klines_type)
+
+
+    def getBinanceSocketManager(self):
+        return SimulateBinanceSocketManager(self._delegate)
 
 
 @custom_inherit(AsyncClient, delegator='_delegate')
 class SimulateBinanceSocketManager():
     def __init__(self, delegate: BinanceSocketManager):
         self._delegate = delegate
+        self._queue_user = Queue()
+        self._queue_multiplex = Queue()
 
     def user_socket(self):
-        return SimulateUserSocket()
+        return SimulateUserSocket(self._queue_user)
 
     def multiplex_socket(self, socket: Iterable[str]):
-        return SimulateMultiplexSocket()
+        return SimulateMultiplexSocket(self._queue_multiplex)
+
+    def add_user_socket_event(self, event: Dict[str, Any]):
+        self._queue_user.put_nowait(event)
+
+    def add_multicast_event(self, event: Dict[str, Any]):
+        self._queue_multiplex.put_nowait(event)
 
 
 class SimulateUserSocket():
+    def __init__(self, queue: Queue):
+        self._queue = queue
+
     async def __aenter__(self):
         return self
 
@@ -401,11 +574,13 @@ class SimulateUserSocket():
         return self
 
     async def recv(self):
-        await sleep(0.5)
-        return {"_fake": True}
+        return await self._queue.get()
 
 
 class SimulateMultiplexSocket():
+    def __init__(self, queue: Queue):
+        self._queue = queue
+
     async def __aenter__(self):
         return self
 
@@ -413,11 +588,7 @@ class SimulateMultiplexSocket():
         return self
 
     async def recv(self):
-        await sleep(0.5)
-        return {
-            "_fake": True,
-            "data": {}
-        }
+        return await self._queue.get()
 
 
 class SimulationUserStream():

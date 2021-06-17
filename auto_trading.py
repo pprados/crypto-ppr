@@ -46,7 +46,7 @@ async def main():
                 # client = await TypingClient.create(api_key, api_secret, testnet=test_net)
                 # socket_manager = BinanceSocketManager(client._delegate, user_timeout=60)
                 client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-                socket_manager = SimulateBinanceSocketManager(client._delegate)
+                socket_manager = client.getBinanceSocketManager()
                 try:
                     await client.ping()
                     break

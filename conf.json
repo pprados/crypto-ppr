@@ -7,18 +7,26 @@
   },
   {
     "winter_summer": {
-      "interval": "5m",
-//      "symbol": "XRPBNB",
       "symbol": "BTCUSDT",
+
+      //      "interval": "5m",
 //      "quote_quantity": "1%",
-      "base_quantity": "0.1%",
-      "winter": "-0.0001%",
+//      "base_quantity": "0.1%",
+//      "winter": "-0.0001%",
 //      "top": 36000,
 //      "interval_top": "1M",
 //      "history_top": "5 years ago UTC",
       // Les deux valeurs suivante permettent de partir d'un top 'proche'
-      "interval_top": "1h",
-      "history_top": "1 hour ago UTC",
+//      "interval_top": "1w",
+//      "interval_top": "1h",
+
+      // Set pour simulation history
+      "base_quantity": "100%",
+      "top": "4400", // Force la valeur du top
+      // FIXME "interval_top": "1d",  // Période pour rechercher le top
+      "interval": "2d",  // Moyenne entre open,high,low,close sur la période précédante
+      "history_top": "1 hour ago",
+      "winter": "-0.0001%",
       "summer": "0.0001%", // Doit etre positif normalement
     }
   }

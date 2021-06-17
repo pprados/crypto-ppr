@@ -159,7 +159,7 @@ class AddOrder(BotGenerator):
                 else:
                     # Il est passé, donc on reprend de là.
                     self.order = pending_order[0]
-                    log.info(f'Recover order {order["clientOrderId"]}')
+                    log.info(f'Recover order {order["clientOrderId"]} from Binance')
                 self.state = AddOrder.STATE_ORDER_CONFIRMED
                 yield self
 
