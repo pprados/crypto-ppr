@@ -22,7 +22,7 @@
 
       // Set pour simulation history
       "base_quantity": "100%",
-      "top": "4400", // Force la valeur du top
+      "top": "4700", // Force la valeur du top
       // FIXME "interval_top": "1d",  // Période pour rechercher le top
       "interval": "2d",  // Moyenne entre open,high,low,close sur la période précédante
       "history_top": "1 hour ago",

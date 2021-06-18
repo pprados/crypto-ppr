@@ -7,54 +7,58 @@ import logging
 import random
 import sys
 from asyncio import Queue
-from datetime import datetime
 from decimal import Decimal
 from typing import Dict, Any, Optional, List, Tuple, Iterable, Generator
 
 from binance import AsyncClient, BinanceSocketManager
 from binance.enums import HistoricalKlinesType, ORDER_TYPE_MARKET, SIDE_SELL, ORDER_TYPE_LIMIT, SIDE_BUY, \
-    ORDER_STATUS_FILLED, ORDER_STATUS_NEW
+    ORDER_STATUS_FILLED, ORDER_STATUS_NEW, ORDER_STATUS_CANCELED
 from binance.helpers import interval_to_milliseconds, date_to_milliseconds
 
 from TypingClient import TypingClient
 from delegate_attribut import custom_inherit
 from download_history import download_historical_values
+from shared_time import *
 from tools import split_symbol, str_d, Order, Order_attr
 
 log = logging.getLogger(__name__)
 
-def to_str_date(timestamp:int) -> str:
+
+def to_str_date(timestamp: int) -> str:
     return datetime.utcfromtimestamp(timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
+
 
 def to_datetime(binance_datetime: str):
     return datetime.fromtimestamp(int(binance_datetime) / 1000)
 
 
 class SimulateFromHistory():
-    GARDE_PERIOD=10
+    GARDE_PERIOD = 10
+
     def __init__(self, symbol: str):  # TODO: debut et fin de simulation
         self.symbol = symbol
         self._datas = download_historical_values(symbol, "1d")
-        self._now = self._datas.iloc[SimulateFromHistory.GARDE_PERIOD]['unix'] * 1000  # En millisecondes (et non en secondes)
+        set_now(
+            self._datas.iloc[SimulateFromHistory.GARDE_PERIOD]['unix'] * 1000)  # En millisecondes (et non en secondes)
 
     def add_order(self, ts: int, val: Decimal, vol: Decimal):
         pass
 
     def generate_values(self) -> Generator[Decimal, Any, Any]:
         for _, row in self._datas[SimulateFromHistory.GARDE_PERIOD:].iterrows():
-            self._now = row['unix'] * 1000
+            set_now(row['unix'] * 1000)
             yield Decimal(row['open'])
-            self._now = row['unix'] * 1000 + 1
+            set_now(row['unix'] * 1000 + 1)
             # High et low dans un ordre aléatoire, mais répétable
             yield Decimal(row['high']) if int(row['open']) % 2 == 0 else Decimal(row['low'])
-            self._now = row['unix'] * 1000 + 2
+            set_now(row['unix'] * 1000 + 2)
             yield Decimal(row['low']) if int(row['open']) % 2 == 0 else Decimal(row['high'])
-            self._now = row['unix'] * 1000 + 3
+            set_now(row['unix'] * 1000 + 3)
             yield Decimal(row['close'])
 
     @property
     def now(self):
-        return self._now
+        return get_now()
 
     #         :param symbol: required
     #         :type symbol: str
@@ -67,15 +71,15 @@ class SimulateFromHistory():
     #         :param endTime:
     #         :type endTime: int
     def get_klines(self,
-                   symbol:str,
-                   interval:str,
-                   startTime:Optional[int]=None,
-                   endTime:Optional[int]=None,
-                   limit:int=500) -> List[List[Any]]:
+                   symbol: str,
+                   interval: str,
+                   startTime: Optional[int] = None,
+                   endTime: Optional[int] = None,
+                   limit: int = 500) -> List[List[Any]]:
         return self.get_historical_klines(interval=interval,
-                                   start_str=to_str_date(startTime) if startTime else "now",
-                                   end_str=to_str_date(endTime) if endTime else None,
-                                   limit=limit)
+                                          start_str=to_str_date(startTime) if startTime else "now",
+                                          end_str=to_str_date(endTime) if endTime else None,
+                                          limit=limit)
 
     def get_historical_klines(self,
                               interval: str,
@@ -85,7 +89,7 @@ class SimulateFromHistory():
                               klines_type: HistoricalKlinesType = HistoricalKlinesType.SPOT) -> List[List[Any]]:
         """ Recalcul les klines à parti d'un historique. """
         now = date_to_milliseconds("now UTC")
-        delta_now = now - self._now
+        delta_now = now - self.now
 
         history = date_to_milliseconds(start_str) - delta_now
 
@@ -99,7 +103,8 @@ class SimulateFromHistory():
                    Decimal(row["close"]),
                    row["unix"], 1, 1, 1, 1, ""]
                   for _, row
-                  in self._datas[self._datas["unix"].between(history/1000, (history + interval_milli)/1000)].iterrows()]
+                  in self._datas[
+                      self._datas["unix"].between(history / 1000, (history + interval_milli) / 1000)].iterrows()]
         if len(result) > limit:
             result = result[:limit]
         # TODO: conversion d'echelle > uniquement ?
@@ -240,7 +245,8 @@ class SimulateRandomValues():
 # et les dates en Date.
 # Cette classe va évoluer au fur et à mesure des besoins.
 class SimulateClient(TypingClient):
-    log_current=0
+    log_current = 0
+
     @classmethod
     async def create(
             cls,
@@ -355,7 +361,6 @@ class SimulateClient(TypingClient):
             balance_quote["locked"] -= quantity
 
     def add_order(self, order: Order) -> Order:
-        log.debug(f"Add order {order}")
         balance_base, balance_quote = self._split_balance(order["symbol"])
         quantity = Decimal(order["quantity"])
         if order["type"] in (ORDER_TYPE_LIMIT):
@@ -367,7 +372,22 @@ class SimulateClient(TypingClient):
                 balance_quote["free"] -= quantity * limit
                 balance_quote["locked"] += quantity * limit
         self._orders.append(order)
+        log.debug(f"Add order {order} (len:{self.count_active_order()})")
         return order
+
+    def count_active_order(self) -> int:
+        return len(list(filter(lambda order: order['status'] == ORDER_STATUS_NEW, self._orders)))
+
+    async def cancel_order(self,
+                           symbol: str,
+                           orderId: int,
+                           origClientOrderId: Optional[str] = None,
+                           newClientOrderId: Optional[str] = None,
+                           recvWindows: Optional[int] = None):
+        for order in self._orders:
+            if order.get("orderId", "") == orderId:
+                order['status'] = ORDER_STATUS_CANCELED
+                break
 
     async def tick(self):
         """ Avance la simulation d'une valeur """
@@ -537,7 +557,6 @@ class SimulateClient(TypingClient):
     async def get_historical_klines(self, symbol, interval, start_str, end_str=None, limit=500,
                                     klines_type: HistoricalKlinesType = HistoricalKlinesType.SPOT):
         return self._simulate_values.get_historical_klines(interval, start_str, end_str, limit, klines_type)
-
 
     def getBinanceSocketManager(self):
         return SimulateBinanceSocketManager(self._delegate)

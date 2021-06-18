@@ -17,11 +17,11 @@ from TypingClient import TypingClient
 from conf import MIN_RECONNECT_WAIT
 from simulate_client import SimulateClient, SimulateBinanceSocketManager
 from tools import atomic_load_json
+import global_flags
 
 api_key = os.environ["BINANCE_API_KEY"]
 api_secret = os.environ["BINANCE_API_SECRET"]
 test_net = os.environ.get("BINANCE_API_TEST", "false").lower() == "true"
-
 
 async def main():
     log = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ async def main():
                 # FIXME
                 # client = await TypingClient.create(api_key, api_secret, testnet=test_net)
                 # socket_manager = BinanceSocketManager(client._delegate, user_timeout=60)
+                global_flags.simulation = True
                 client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
                 socket_manager = client.getBinanceSocketManager()
                 try:
@@ -120,6 +121,8 @@ async def main():
         finally:
             if client:
                 await client.close_connection()
+        if global_flags.simulation:
+            break
 
 
 if __name__ == "__main__":

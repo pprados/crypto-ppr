@@ -18,7 +18,6 @@ Au début, aligne les 2 coins pour n'en avoir qu'un seul, suivant le plus gros.
 Ce n'est pas toujours possible, à cause des limites de ventes et d'achats de la paire.
 Pour le moment, cela génère une erreur, avant de trouver mieux.
 """
-
 """
 TODO
 
@@ -51,7 +50,9 @@ from multiplex_stream import add_multiplex_socket
 from tools import atomic_load_json, generate_order_id, wait_queue_init, update_order, split_symbol, \
     atomic_save_json, check_order, log_order, json_order, log_add_order, to_usdt, str_order, str_d, Wallet
 
+import global_flags
 from simulate_client import *
+
 
 # TODO: a voir dans streams
 #     MAX_RECONNECTS = 5
@@ -60,7 +61,6 @@ from simulate_client import *
 #     TIMEOUT = 10
 #     NO_MESSAGE_RECONNECT_TIMEOUT = 60
 
-COEF_SLEEP=0
 def _benefice(log: logging, symbol: str, wallet: Dict[str, Decimal], base_solde: Decimal, quote_solde: Decimal) -> None:
     base, quote = split_symbol(symbol)
     log.info(f"###### Result: {str_d(wallet[base] - base_solde)} {base} / {str_d(wallet[quote] - quote_solde)} {quote}")
@@ -76,7 +76,9 @@ MINIMUM_REDUCE_PRICE = Decimal("0.99")
 # Utilisation d'un generateur pour pouvoir utiliser la stratégie
 # dans une autre.
 class WinterSummerBot(BotGenerator):
-    POOLING_SLEEP = 2 * COEF_SLEEP
+    # self.last_price c'est le prix de la dernière transaction
+
+    POOLING_SLEEP = 2 * sleep_speed()
 
     STATE_INIT = "init"
     STATE_ALIGN_WINTER = "align_winter"
@@ -274,6 +276,8 @@ class WinterSummerBot(BotGenerator):
                 # Vend les 'base' pour n'avoir que du 'quote'
                 elif self.state == WinterSummerBot.STATE_ALIGN_WINTER:
                     current_price = (await client.get_symbol_ticker(symbol=symbol))["price"]
+                    self.top_value = max(current_price,self.top_value)
+
                     # quantity = self.wallet[quote]
                     # updated_quantity = update_market_lot_size(symbol_info, quantity)
                     # if True : # quantity != updated_quantity:
@@ -337,6 +341,7 @@ class WinterSummerBot(BotGenerator):
                 elif self.state == WinterSummerBot.STATE_WAIT_ALIGN_WINTER_ORDER_FILLED:
                     await self.winter_order.next()
                     if self.winter_order.is_filled():
+                        self.last_price=self.winter_order.order['price']
                         del self.winter_order
                         self.state = WinterSummerBot.STATE_ALIGN_WINTER
                         log_wallet(log, self.wallet)
@@ -350,6 +355,8 @@ class WinterSummerBot(BotGenerator):
                 # Vend les 'quote' pour n'avoir que du 'base'
                 elif self.state == WinterSummerBot.STATE_ALIGN_SUMMER:
                     current_price = Decimal((await client.get_symbol_ticker(symbol=symbol))["price"])
+                    self.top_value = max(current_price,self.top_value)
+
                     order = {
                         "newClientOrderId": generate_order_id(generator_name),
                         "symbol": symbol,
@@ -376,6 +383,7 @@ class WinterSummerBot(BotGenerator):
                 elif self.state == WinterSummerBot.STATE_WAIT_ALIGN_SUMMER_ORDER_FILLED:
                     await self.summer_order.next()
                     if self.summer_order.is_filled():
+                        self.last_price=self.summer_order.order['price']
                         log_order(log, self.summer_order.order)
                         del self.summer_order
                         self.state = WinterSummerBot.STATE_WINTER_ORDER
@@ -392,28 +400,35 @@ class WinterSummerBot(BotGenerator):
                     # Calcul la moyenne de la période précédente, et ajuste un ordre
                     # sur cette base.
                     current_price = (await client.get_symbol_ticker(symbol=symbol))["price"]
+                    self.top_value = max(current_price,self.top_value)
+
                     # log.info(f"{current_price=}")
                     old_avg_price = self.avg_price if 'avg_price' in self else Decimal(0)
                     self.avg_price = await self.get_avg_last_interval(client, interval, symbol)
-                    log.debug(f">>> new avg_price = {self.avg_price} for {interval} ({old_avg_price=})")
+                    log.debug(f">>> new avg_price = {str_d(self.avg_price)} for {interval} (previous {old_avg_price})")
+
+                    # Le prix cible d'achat, c'est une base de la moyenne précédente
                     price = self.avg_price * (1 + lower_percent)
+
                     log.debug(f"Je cherche à acheter lorsque le prix est < à avg_price de {lower_percent}")
                     if price > self.last_price:
                         log.warning(
-                            f"Official lower BUY price is upper previous SELL price "
-                            f"({str_d(price)}/{str_d(self.last_price)}). "
-                            f"Change to {MINIMUM_REDUCE_PRICE} du last {self.last_price * MINIMUM_REDUCE_PRICE}")
+                            f"J'ai vendu à {str_d(self.last_price)} {quote}, mais ma cible d'achat est trop haute "
+                            f"à {str_d(price)} {quote} par rapport à la moyenne précédente.\n"
+                            f"J'ajuste ma cible "
+                            f"à {1-MINIMUM_REDUCE_PRICE}% du dernier prix d'achat, "
+                            f"soit {self.last_price * MINIMUM_REDUCE_PRICE} {quote}")
                         price = self.last_price * MINIMUM_REDUCE_PRICE
 
                     if price > current_price:
-                        # FIXME peut etre viré et vendre au MARKET dans ce cas.
+                        # FIXME ajuster à la baisse, ou en profiter pour acheter en traquant la baisse ?.
                         log.warning(
-                            f"Official lower BUY price is upper current price (cur:{price}). "
-                            f"Change to {current_price * MINIMUM_REDUCE_PRICE}")
-                        price = current_price * MINIMUM_REDUCE_PRICE
+                            f"Le price cible de baisse, s'avere > au dernier prix (avg:{str_d(avg_price)} cible:{str_d(price)} > cur:{str_d(current_price)}). "
+                            f"Change to {str_d(current_price * (1 + lower_percent))}")
+                        price = current_price * (1 + lower_percent)
                     quantity = self.wallet[quote] / price
-                    self.last_price = price
 
+                    # Et je lance un ordre d'achat bas
                     # TODO: voir si le type d'ordre n'est pas take profit ou ...
                     # TODO: vérifier si stop_lost est possible pour cette devise, sinon, simple ORDER_TYPE_LIMIT
                     # ['LIMIT', 'LIMIT_MAKER', 'MARKET', 'STOP_LOSS_LIMIT', 'TAKE_PROFIT_LIMIT']
@@ -458,8 +473,10 @@ class WinterSummerBot(BotGenerator):
                         self.state = WinterSummerBot.STATE_ERROR
                         yield self
                         continue
+
+                    # Je calcul quand rafraichir la cible basse, par rapport à la période précédante
                     delta = interval_to_milliseconds(interval) / 4
-                    self.next_refresh = datetime.now(timezone.utc).timestamp() * 1000 + delta
+                    self.next_refresh = get_now() + delta
                     order = update_order(symbol_info, current_price, order, accept_upper=False)
                     await client.create_test_order(**json_order(str_order(order)))
                     self.winter_order = await AddOrder.create(
@@ -486,7 +503,7 @@ class WinterSummerBot(BotGenerator):
                 elif self.state == WinterSummerBot.STATE_WAIT_WINTER_ORDER_FILLED:
                     await self.winter_order.next()
                     if self.winter_order.is_waiting():
-                        if datetime.now(timezone.utc).timestamp() * 1000 > self.next_refresh:
+                        if get_now() > self.next_refresh:
                             avg_price = await self.get_avg_last_interval(client, interval, symbol)
                             if avg_price != self.avg_price:
                                 log.info(f"modify avg_price = {avg_price}")
@@ -498,6 +515,7 @@ class WinterSummerBot(BotGenerator):
                             continue
 
                     if self.winter_order.is_filled():
+                        self.last_price=self.winter_order.order['price']
                         _benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
                         del self.winter_order
                         self.state = WinterSummerBot.STATE_WAIT_SUMMER
@@ -514,13 +532,15 @@ class WinterSummerBot(BotGenerator):
 
                 elif self.state == WinterSummerBot.STATE_WAIT_SUMMER:
                     current_price = (await client.get_symbol_ticker(symbol=symbol))["price"]
+                    self.top_value = max(current_price,self.top_value)
+
                     log.info(f"current price ={current_price}")
                     price = self.target_summer
-                    if price < self.last_price:
-                        log.warning(f"Official SELL price below BUY price {price}. Change to {self.last_price}")
-                        price = self.last_price
-                    self.last_price = price
-
+                    if self.target_summer < self.last_price:
+                        log.warning(f"L'objectif de vente initial ({str_d(self.target_summer)} {quote}) est sous mon dernier prix d'achat {str_d(self.last_price)}.\n"
+                                    f" Change to {str_d(max(self.last_price,current_price) * (1 + upper_percent))}")
+                        price = max(self.last_price,current_price) * (1 + upper_percent)
+                    # TODO: track sell
                     quantity = self.wallet[base]  # On vent tout
                     if not quantity:
                         log.error("Quantity is zero !")
@@ -583,6 +603,7 @@ class WinterSummerBot(BotGenerator):
                 elif self.state == WinterSummerBot.STATE_WAIT_SUMMER_ORDER_FILLED:
                     await self.summer_order.next()
                     if self.summer_order.is_filled():
+                        self.last_price=self.summer_order.order['price']
                         _benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
                         log_wallet(log, self.wallet)
                         del self.summer_order
@@ -657,7 +678,7 @@ async def bot(client: AsyncClient,
 
     # Lecture éventuelle du context sauvegardé
     json_generator = {}
-    if path.exists():
+    if not global_flags.simulation and path.exists():
         json_generator, rollback = atomic_load_json(path)
         assert not rollback
         log.info(f"Restart with state={json_generator['state']}")
@@ -675,4 +696,5 @@ async def bot(client: AsyncClient,
     while True:
         if await bot_generator.next() == STOPPED:
             return
-        atomic_save_json(bot_generator, path)
+        if not global_flags.simulation:
+            atomic_save_json(bot_generator, path)
