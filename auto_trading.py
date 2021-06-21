@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 from TypingClient import TypingClient
 from conf import MIN_RECONNECT_WAIT
-from simulate_client import SimulateClient, SimulateBinanceSocketManager
+from simulate_client import SimulateClient, SimulateBinanceSocketManager, EndOfDatas
 from tools import atomic_load_json
 import global_flags
 
@@ -126,6 +126,9 @@ async def main():
 
 
 if __name__ == "__main__":
+    ctx = decimal.getcontext()
+    ctx.prec = 8
+    ctx.traps[decimal.FloatOperation] = True
     while True:
         try:
             load_dotenv()
@@ -149,6 +152,9 @@ if __name__ == "__main__":
             loop.run_until_complete(main())
         except ClientOSError as ex:
             logging.info("Connect reset by peer")
+        except EndOfDatas as ex:
+            logging.info("Simulation ended")
+            break
         except KeyboardInterrupt as ex:
             logging.info("Quit by user")
             break

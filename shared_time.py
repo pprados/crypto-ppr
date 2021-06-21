@@ -19,6 +19,9 @@ def get_now() -> int:
     else:
         return _now
 
+def ts_to_str(timestamp: int) -> str:
+    return datetime.utcfromtimestamp(timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
+
 def sleep_speed() -> int:
     if not global_flags.simulation or not _now:
         return 1

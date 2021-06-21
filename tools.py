@@ -14,6 +14,8 @@ from binance.enums import *
 from binance.exceptions import BinanceAPIException
 from binance.helpers import round_step_size
 
+from shared_time import get_now, ts_to_str
+
 Order_attr = Union[str,float,Decimal,int,bool]
 Order = Dict[str,Order_attr]
 Wallet = Dict[str,Decimal]
@@ -310,13 +312,13 @@ def _dump_order(log: logging, order: Dict[str, Any], prefix: str, suffix: str = 
     side, token, other, quantity, quote_order_qty, price = _parse_order(order)
     str_price = "market" if order['type'] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER) else str_d(price)
     if quantity:
-        log.info(f"{prefix}{side} {str_d(quantity)} {token} at {str_price} {other}{suffix}")
+        log.info(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at {str_price} {other}{suffix}")
     elif quote_order_qty:
         log.info(f"{prefix}{side} {token} for {str_d(quote_order_qty)} {other} at {str_price} {token}{suffix}")
 
 
 def log_add_order(log: logging, order: Dict[str, Any],prefix=None):
-    _dump_order(log, order, "Try to " if not prefix else prefix, "...")
+    _dump_order(log, order, f"Try to " if not prefix else prefix, "...")
 
 
 def log_order(log: logging, order: Dict[str, Any]):

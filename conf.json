@@ -22,12 +22,16 @@
 
       // Set pour simulation history
       "base_quantity": "100%",
-      "top": "4700", // Force la valeur du top
+      //"top": "4700", // Force la valeur du top
       // FIXME "interval_top": "1d",  // Période pour rechercher le top
-      "interval": "2d",  // Moyenne entre open,high,low,close sur la période précédante
-      "history_top": "1 hour ago",
-      "winter": "-0.0001%",
-      "summer": "0.0001%", // Doit etre positif normalement
+      "history_top": "5 week ago",  // Historique pour rechercher le top
+      "interval": "1w",             // Moyenne entre open,high,low,close sur la période précédante
+      "winter": "-20%",             // Attend une baise de X % par rapport à la moyenne de l'interval précédant
+      "summer": "5%",               // Attend le top + X% pour vendre
+//      "history_top": "1 hour ago",
+//      "interval": "2d",  // Moyenne entre open,high,low,close sur la période précédante
+//      "winter": "-0.0001%",
+//      "summer": "0.0001%", // Doit etre positif normalement
     }
   }
 ]

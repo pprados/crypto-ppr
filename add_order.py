@@ -152,14 +152,14 @@ class AddOrder(BotGenerator):
                     filter(lambda x: x.get("newClientOrderId", "") == self.order["newClientOrderId"], orders))
                 if not pending_order:
                     # Finalement, l'ordre n'est pas passé ou est déjà validé, on le relance ?
-                    log.info(f'Resend order {self.order["newClientOrderId"]}...')
+                    log.debug(f'Resend order {self.order["newClientOrderId"]}...')
                     order = await client.create_order(**self.order)
                     log.debug(f'Order {order["clientOrderId"]} created')
                     self.order = order
                 else:
                     # Il est passé, donc on reprend de là.
                     self.order = pending_order[0]
-                    log.info(f'Recover order {order["clientOrderId"]} from Binance')
+                    log.debug(f'Recover order {order["clientOrderId"]} from Binance')
                 self.state = AddOrder.STATE_ORDER_CONFIRMED
                 yield self
 

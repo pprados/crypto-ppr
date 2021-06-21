@@ -6,6 +6,7 @@
 #https://www.cryptodatadownload.com/cdd/Binance_ETHUSDT_d.csv
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 import urllib.request
@@ -29,5 +30,7 @@ def download_historical_values(symbol:str, interval:str) -> pd.DataFrame:
         response.readline()
         open(filename, 'wb').write(response.read())
     data = pd.read_csv(filename)
+    # Ajustement des données historiques en secondes
+    data['unix'] = data['unix'].apply(lambda x: x * 1000 if x < 10000000000 else x)
     data = data.reindex(index=data.index[::-1])
     return data

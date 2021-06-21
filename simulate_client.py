@@ -23,6 +23,8 @@ from tools import split_symbol, str_d, Order, Order_attr
 
 log = logging.getLogger(__name__)
 
+class EndOfDatas(Exception):
+    pass
 
 def to_str_date(timestamp: int) -> str:
     return datetime.utcfromtimestamp(timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
@@ -33,43 +35,34 @@ def to_datetime(binance_datetime: str):
 
 
 class SimulateFromHistory():
-    GARDE_PERIOD = 10
+    GARDE_PERIOD = 30  # FIXME
 
     def __init__(self, symbol: str):  # TODO: debut et fin de simulation
         self.symbol = symbol
-        self._datas = download_historical_values(symbol, "1d")
-        set_now(
-            self._datas.iloc[SimulateFromHistory.GARDE_PERIOD]['unix'] * 1000)  # En millisecondes (et non en secondes)
+        self._interval = "1d"
+        self._datas = download_historical_values(symbol, self._interval)
+        set_now(self._datas.iloc[SimulateFromHistory.GARDE_PERIOD]['unix'])  # En millisecondes (et non en secondes)
 
     def add_order(self, ts: int, val: Decimal, vol: Decimal):
         pass
 
     def generate_values(self) -> Generator[Decimal, Any, Any]:
         for _, row in self._datas[SimulateFromHistory.GARDE_PERIOD:].iterrows():
-            set_now(row['unix'] * 1000)
-            yield Decimal(row['open'])
-            set_now(row['unix'] * 1000 + 1)
+            set_now(row['unix'])
+            yield Decimal(str(row['open']))
+            set_now(row['unix'] + 1)
             # High et low dans un ordre aléatoire, mais répétable
-            yield Decimal(row['high']) if int(row['open']) % 2 == 0 else Decimal(row['low'])
-            set_now(row['unix'] * 1000 + 2)
-            yield Decimal(row['low']) if int(row['open']) % 2 == 0 else Decimal(row['high'])
-            set_now(row['unix'] * 1000 + 3)
-            yield Decimal(row['close'])
+            yield Decimal(str(row['high'])) if int(row['open']) % 2 == 0 else Decimal(str(row['low']))
+            set_now(row['unix'] + 2)
+            yield Decimal(str(row['low'])) if int(row['open']) % 2 == 0 else Decimal(str(row['high']))
+            set_now(row['unix'] + 3)
+            yield Decimal(str(row['close']))
+        raise EndOfDatas()
 
     @property
     def now(self):
         return get_now()
 
-    #         :param symbol: required
-    #         :type symbol: str
-    #         :param interval: -
-    #         :type interval: str
-    #         :param limit: - Default 500; max 500.
-    #         :type limit: int
-    #         :param startTime:
-    #         :type startTime: int
-    #         :param endTime:
-    #         :type endTime: int
     def get_klines(self,
                    symbol: str,
                    interval: str,
@@ -96,47 +89,53 @@ class SimulateFromHistory():
         interval_milli = interval_to_milliseconds(interval)
         assert interval_milli, f"Interval non valide ({interval})"
 
-        result = [[row["unix"],
-                   Decimal(row["open"]),
-                   Decimal(row["high"]),
-                   Decimal(row["low"]),
-                   Decimal(row["close"]),
-                   row["unix"], 1, 1, 1, 1, ""]
-                  for _, row
-                  in self._datas[
-                      self._datas["unix"].between(history / 1000, (history + interval_milli) / 1000)].iterrows()]
-        if len(result) > limit:
-            result = result[:limit]
-        # TODO: conversion d'echelle > uniquement ?
-        # open_time = history
-        # while True:
-        #     low = sys.float_info.max
-        #     high = Decimal(0)
-        #     open = Decimal(0)
-        #     number_of_trade = 0
-        #     taker_buy_base_asset_volume = 0
-        #     first = False
-        #     kl_close = Decimal(0)
-        #     for _,(ts, _, _, kl_open, kl_high, kl_low, kl_close, kl_vol_base,kl_vol_quote,_) in \
-        #             self._datas[self._datas["unix"].between(history, (history + interval))].iterrows():
-        #         if not first:
-        #             open = kl_open
-        #             first = True
-        #
-        #         low = min(low, kl_low)
-        #         high = max(high, kl_high)
-        #         number_of_trade += 1
-        #         taker_buy_base_asset_volume += 1  # FIXME vol
-        #     close = kl_close
-        #     close_time = open_time  # FIXME: ce n'est pas correct
-        #     quote_asset_volume = "0"  # FIXME
-        #     taker_buy_quote_asset_volume = "0"  # FIXME
-        #     result.append([open_time, open, high, low, close, close_time,
-        #                    quote_asset_volume, number_of_trade,
-        #                    taker_buy_base_asset_volume, taker_buy_quote_asset_volume, "Ignore"])
-        #     open_time += interval
-        #     if open_time > now or len(result) > limit:
-        #         break
+        if interval == self._interval:
+            result = [[row["unix"],
+                       Decimal(row["open"]),
+                       Decimal(row["high"]),
+                       Decimal(row["low"]),
+                       Decimal(row["close"]),
+                       row["unix"], 1, 1, 1, 1, ""]
+                      for _, row
+                      in self._datas[
+                          self._datas["unix"].between(history, (history + interval_milli))].iterrows()]
+            if len(result) > limit:
+                result = result[:limit]
+        else:
+            open_time = history
+            result=[]
+            while True:
+                selected_kline = self._datas[self._datas["unix"].between(history, (history + interval_milli))]
+                if len(selected_kline):
+                    low = Decimal(str(sys.float_info.max))
+                    high = Decimal(0)
+                    open = Decimal(0)
+                    number_of_trade = 0
+                    taker_buy_base_asset_volume = 0
+                    first = False
+                    kl_close = Decimal(0)
+                    for _,(ts, _, _, kl_open, kl_high, kl_low, kl_close, kl_vol_base,kl_vol_quote,_) in \
+                            selected_kline.iterrows():
+                        if not first:
+                            open = Decimal(str(kl_open))
+                            first = True
+
+                        low = min(low, Decimal(str(kl_low)))
+                        high = max(high, Decimal(str(kl_high)))
+                        number_of_trade += 4  # FIXME: nb of trade
+                        taker_buy_base_asset_volume += 1  # FIXME vol
+                    close_time = ts + interval_milli
+                    close = Decimal(str(kl_close))
+                    quote_asset_volume = "0"  # FIXME: volume asset
+                    taker_buy_quote_asset_volume = "0"  # FIXME: volume quote
+                    result.append([open_time, open, high, low, close, close_time,
+                                   quote_asset_volume, number_of_trade,
+                                   taker_buy_base_asset_volume, taker_buy_quote_asset_volume, "Ignore"])
+                    open_time += interval_milli
+                    if open_time > now or len(result) > limit:
+                        break
+                else:
+                    raise EndOfDatas()  # TODO
         return result
 
 
@@ -254,12 +253,15 @@ class SimulateClient(TypingClient):
             api_secret: Optional[str] = None,
             **kw
     ):
-        return SimulateClient(await AsyncClient.create(api_key, api_secret, **kw))
+        sclient=SimulateClient(await AsyncClient.create(api_key, api_secret, **kw))
+        await sclient.tick()
+        return sclient
 
     def __init__(self, delegate: AsyncClient):
         super().__init__(delegate)
         self._orders = []
         self._order_id = 0
+        self._max = 0
         self._account = {
             "makerCommission": 0,
             "takerCommission": 0,
@@ -391,20 +393,21 @@ class SimulateClient(TypingClient):
 
     async def tick(self):
         """ Avance la simulation d'une valeur """
-
+        # log.info("TICK")
         # Avance d'une valeur
-        current_value = next(self._values)
+        self._current_value = next(self._values)  # N'avance qu'ici
+        self._max = max(self._max,self._current_value)
         SimulateClient.log_current += 1
         if SimulateClient.log_current % 100 == 0:
             str_now = to_str_date(self._simulate_values.now)
-            log.info(f"{str_now} current={current_value}")
+            log.info(f"{str_now} current={self._current_value} max={self._max}")
 
         # Analyse des ordres à traiter
         for order in filter(lambda order: order["status"] in (ORDER_STATUS_NEW), self._orders):
             if order["type"] == ORDER_TYPE_MARKET:
-                self.apply_order(current_value, order)
+                self.apply_order(self._current_value, order)
             elif order["type"] == ORDER_TYPE_LIMIT:
-                self.apply_order(current_value, order)
+                self.apply_order(self._current_value, order)
 
     async def get_recent_trades(self, **kwargs) -> List[Dict[str, Any]]:
         result = await super().get_recent_trades(**kwargs)
@@ -416,6 +419,7 @@ class SimulateClient(TypingClient):
 
     async def get_klines(self, **params) -> Dict:
         result = await super().get_klines(**params)
+        await self.tick()
         return result
 
     async def get_historical_klines(self, symbol, interval, start_str, end_str=None, limit=500,
@@ -436,8 +440,8 @@ class SimulateClient(TypingClient):
 
     async def get_symbol_ticker(self, **params):
         if params["symbol"] == self._simulate_values.symbol:
-            result = next(self._values)
             await self.tick()
+            result = self._current_value
             return \
                 {
                     "symbol": params["symbol"],
