@@ -153,7 +153,7 @@ if __name__ == "__main__":
         except ClientOSError as ex:
             logging.info("Connect reset by peer")
         except EndOfDatas as ex:
-            logging.info("Simulation ended")
+            logging.info(f"Simulation ended ({ex.price} {ex.dev})")
             break
         except KeyboardInterrupt as ex:
             logging.info("Quit by user")

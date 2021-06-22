@@ -719,3 +719,4 @@ async def bot(client: AsyncClient,
     except EndOfDatas:
         log.info("######: Final result of simulation:")
         log_wallet(log,bot_generator.wallet)
+        raise

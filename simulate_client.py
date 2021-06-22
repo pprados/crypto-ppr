@@ -24,7 +24,9 @@ from tools import split_symbol, str_d, Order, Order_attr
 log = logging.getLogger(__name__)
 
 class EndOfDatas(Exception):
-    pass
+    def __init__(self,last_price:Decimal,dev:str):
+        self.price = last_price
+        self.dev = dev
 
 def to_str_date(timestamp: int) -> str:
     return datetime.utcfromtimestamp(timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
@@ -57,7 +59,7 @@ class SimulateFromHistory():
             yield Decimal(str(row['low'])) if int(row['open']) % 2 == 0 else Decimal(str(row['high']))
             set_now(row['unix'] + 3)
             yield Decimal(str(row['close']))
-        raise EndOfDatas()
+        raise EndOfDatas(Decimal(str(row['close'])))
 
     @property
     def now(self):
@@ -400,7 +402,7 @@ class SimulateClient(TypingClient):
         SimulateClient.log_current += 1
         if SimulateClient.log_current % 100 == 0:
             str_now = to_str_date(self._simulate_values.now)
-            log.info(f"{str_now} current={self._current_value} max={self._max}")
+            log.info(f"{str_now} current={self._current_value} top={self._max}")
 
         # Analyse des ordres à traiter
         for order in filter(lambda order: order["status"] in (ORDER_STATUS_NEW), self._orders):
