@@ -9,6 +9,8 @@ from typing import Callable, Dict, Any, List
 from binance import AsyncClient, BinanceSocketManager
 from binance.exceptions import BinanceAPIException
 
+from TypingClient import TypingClient
+
 _call_back: List[Callable[[Dict[str, Any], Any], None]] = []
 
 
@@ -17,13 +19,14 @@ def add_user_socket(cb: Callable[[Dict[str, Any], Any], None]):
     _call_back.append(cb)
 
 
-async def bot(client: AsyncClient,
-              socket_manager:BinanceSocketManager,
+async def bot(client: TypingClient,
               client_account:Dict[str,Any],
               bot_name: str,
-              agent_queues: Dict[str, Queue],
+              agent_queues: List[Dict[str, Queue]],
               conf: Dict[str, Any]):
     log = logging.getLogger(bot_name)
+    socket_manager = client.getBinanceSocketManager()
+
     input_queue = agent_queues[bot_name]  # Queue to receive msg for user or other agent
     await sleep(1)  # Time for waiting the initialisation of others agents
     # and start to listen

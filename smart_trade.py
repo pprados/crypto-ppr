@@ -75,6 +75,7 @@ import asyncio
 import logging
 from asyncio import Queue, QueueEmpty, sleep
 from pathlib import Path
+from typing import List
 
 import aiohttp
 from aiohttp import ClientConnectorError
@@ -84,6 +85,7 @@ from binance.enums import SIDE_SELL, SIDE_BUY, TIME_IN_FORCE_GTC, ORDER_STATUS_N
 from binance.exceptions import BinanceAPIException
 
 import global_flags
+from TypingClient import TypingClient
 from add_order import AddOrder
 from bot_generator import BotGenerator, STOPPED
 from shared_time import sleep_speed, get_now
@@ -157,10 +159,8 @@ class SmartTradeBot(BotGenerator):
                         bot_queue: Queue,
                         log: logging,
                         init: Dict[str, str],  # Initial context
-                        socket_manager: BinanceSocketManager,
                         client_account: Dict[str, Any],
                         generator_name: str,
-                        agent_queues: Dict[str, Queue],  # All agent queues
                         conf: Dict[str, Any],
                         **kwargs) -> None:
 
@@ -702,16 +702,15 @@ class SmartTradeBot(BotGenerator):
 
 # Bot qui utilise le generateur correspondant
 # et se charge de sauver le context.
-async def bot(client: AsyncClient,
-              socket_manager: BinanceSocketManager,
+async def bot(client: TypingClient,
               client_account: Dict[str, Any],
               bot_name: str,
-              agent_queues: Dict[str, Queue],
+              bots_queues: List[Dict[str, Queue]],
               conf: Dict[str, str]):
     path = Path("ctx", bot_name + ".json")
 
     log = logging.getLogger(bot_name)
-    bot_queue = agent_queues[bot_name]
+    bot_queue = bots_queues[bot_name]
 
     # Lecture éventuelle du context sauvegardé
     state_for_generator = {}
@@ -724,10 +723,9 @@ async def bot(client: AsyncClient,
                                                bot_queue,
                                                log,
                                                state_for_generator,
-                                               socket_manager=socket_manager,
                                                generator_name=bot_name,
                                                client_account=client_account,
-                                               agent_queues=agent_queues,
+                                               agent_queues=bots_queues,
                                                conf=conf,
                                                )
     try:

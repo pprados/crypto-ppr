@@ -114,10 +114,8 @@ class WinterSummerBot(BotGenerator):
                         bot_queue: Queue,
                         log: logging,
                         init: Dict[str, str],  # Initial context
-                        socket_manager: BinanceSocketManager,
                         client_account: Dict[str, Any],
                         generator_name: str,
-                        agent_queues: Dict[str, Queue],  # All agent queues
                         conf: Dict[str, str]) -> None:
         try:
             if not init:
@@ -679,7 +677,6 @@ class WinterSummerBot(BotGenerator):
 # Bot qui utilise le generateur correspondant
 # et se charge de sauver le context.
 async def bot(client: AsyncClient,
-              socket_manager: BinanceSocketManager,
               client_account: Dict[str, Any],
               bot_name: str,
               agent_queues: Dict[str, Queue],
@@ -687,6 +684,7 @@ async def bot(client: AsyncClient,
     path = Path("ctx", bot_name + ".json")
 
     log = logging.getLogger(bot_name)
+    socket_manager = client.getBinanceSocketManager()
     bot_queue = agent_queues[bot_name]
 
     # Lecture éventuelle du context sauvegardé
@@ -700,10 +698,8 @@ async def bot(client: AsyncClient,
                                                  bot_queue,
                                                  log,
                                                  json_generator,
-                                                 socket_manager=socket_manager,
                                                  generator_name=bot_name,
                                                  client_account=client_account,
-                                                 agent_queues=agent_queues,
                                                  conf=conf,
                                                  )
     try:

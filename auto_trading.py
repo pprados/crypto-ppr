@@ -33,7 +33,7 @@ async def main():
     unfinished = []
     while True:
         agents = []
-        agent_queues: Dict[str, Queue] = {}
+        bot_queues: Dict[str, Queue] = {}
         try:
             conf, rollback = atomic_load_json(Path("conf.json"))
             if rollback:
@@ -82,20 +82,20 @@ async def main():
                 balance['agent_free'] = balance['free']
 
             for agent in conf:
-                agent_name = list(agent.keys())[0]
-                conf = agent[agent_name]
-                fn_name = conf["function"] if "function" in conf else agent_name
+                bot_name = list(agent.keys())[0]
+                conf = agent[bot_name]
+                fn_name = conf["function"] if "function" in conf else bot_name
                 if '.' not in fn_name:
                     fn_name += ".bot"
                 module_path, fn = fn_name.rsplit(".", 1)
                 async_fun = getattr(import_module(module_path), fn)
 
-                agent_queues[agent_name] = Queue()
+                bot_queues[bot_name] = Queue()  # Create a queue for the bot
+                print(bot_name)
                 agents.append(loop.create_task(async_fun(client,
-                                                         socket_manager,
                                                          client_account,
-                                                         agent_name,
-                                                         agent_queues,
+                                                         bot_name,
+                                                         bot_queues,
                                                          conf)))
 
             # Tous les résultats sont agrégé dans le retour du gather.
@@ -117,7 +117,7 @@ async def main():
             if not ex_msg or ex_msg == 'None':
                 ex_msg = ex.__class__.__name__
             log.error(f"Binance communication error ({ex_msg})")
-            for queue in agent_queues.values():
+            for queue in bot_queues.values():
                 queue.put_nowait(
                     {
                         "from": "_root",
