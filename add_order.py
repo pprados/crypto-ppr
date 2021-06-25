@@ -23,7 +23,7 @@ from binance.exceptions import BinanceAPIException
 
 from bot_generator import BotGenerator
 from conf import STREAM_MSG_TIMEOUT
-from tools import log_order, update_wallet
+from tools import log_order, update_wallet, get_order_price, log_add_order
 from stream_user import add_user_socket
 
 
@@ -37,10 +37,25 @@ class AddOrder(BotGenerator):
     STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET = "wait_order_filled_with_websocket"
     STATE_WAIT_ORDER_FILLED_WITH_POLLING = "wait_order_filled_with_polling"
     STATE_ORDER_FILLED = "order_filled"
+    STATE_ORDER_PARTIALLY_FILLED = "order_partially_filled"  # TODO
     STATE_ORDER_EXPIRED = "order_expired"
     STATE_CANCELING = "order_canceling"
     STATE_CANCELED = "order_canceled"
     STATE_ERROR = "order_error"
+
+    @property
+    def price(self) -> Decimal:
+        return get_order_price(self.order)
+
+    def __repr__(self):
+        return self.state+"->"+self.order
+
+    @property
+    def quantity(self) -> Decimal:
+        if 'executedQty' in self.order:
+            return Decimal(self.order['executedQty'])
+        else:
+            return Decimal(self.order['quantity'])
 
     async def _start(self,
                      client: AsyncClient,
@@ -56,8 +71,9 @@ class AddOrder(BotGenerator):
         await self.next()
         return self
 
-    def is_filled(self):
-        return self.state == AddOrder.STATE_ORDER_FILLED
+    def is_filled(self,accept_partial=False):
+        return self.state == AddOrder.STATE_ORDER_FILLED or accept_partial \
+               and self.state == AddOrder.STATE_ORDER_PARTIALLY_FILLED
 
     # FIXME
     # def is_partially_filled(self):
@@ -78,34 +94,33 @@ class AddOrder(BotGenerator):
 
     async def generator(self,
                         client,
-                        user_queue: Queue,
+                        mixte_queue: Queue,
                         log: logging,
                         init: Dict[str, str],
                         **kwargs):
         if not init:
             init = {
                 "state": AddOrder.STATE_INIT,
-                "order": kwargs['order']
+                "order": kwargs['order'],
+                "newClientOrderId": kwargs['order']["newClientOrderId"]
             }
         self.update(init)
+
+
+        def _get_msg():
+            return mixte_queue.get()
+
+        cb = kwargs.get('cb')  # Call back pour gérer tous les msgs
+        prefix = kwargs.get('prefix','')
+
         wallet:Dict[str,Decimal] = kwargs['wallet']
-        self.continue_if_partially:bool = kwargs.get("continue_if_partially")
+        self.continue_if_partially:bool = kwargs.get("continue_if_partially")  # FIXME
         # Resynchronise l'état sauvegardé
         if self.state in (AddOrder.STATE_ORDER_CONFIRMED, AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET):
             # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
             # Donc, la première fois, on doit utiliser le pooling
             self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
-        yield self
         symbol = self.order['symbol']
-
-        def _get_user_msg():
-            return user_queue.get()
-        add_user_socket(_get_user_msg)
-
-        if self.state in (AddOrder.STATE_ORDER_CONFIRMED, AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET):
-            # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
-            # Donc, la première fois, on doit utiliser le pooling
-            self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
 
         # Finite state machine
         while True:
@@ -117,14 +132,13 @@ class AddOrder(BotGenerator):
                 await client.create_test_order(**self.order)
                 # Puis essaye de l'executer
                 try:
-                    order = await client.create_order(**self.order)
+                    new_order = await client.create_order(**self.order)
                 except BinanceAPIException as ex:
                     if ex.code == -2010:  # Duplicate order sent ?, ignore
-                        # TODO: il faut analyser le text
                         if ex.message == "Duplicate order sent.":
                             # Retrouve l'ordre dupliqué.
                             orders = await client.get_all_orders(symbol=symbol)
-                            order = next(
+                            new_order = next(
                                 filter(lambda x: x.get("clientOrderId", "") == self.order["newClientOrderId"], orders))
                             # et continue
 
@@ -135,35 +149,52 @@ class AddOrder(BotGenerator):
                         elif ex.message.startswith("Filter failure:"):
                             raise
                         elif ex.message == "Stop price would trigger immediately.":
+                            # FIXME: rejouer ou adapter en market ?
+                            # https://dev.binance.vision/t/order-would-trigger-immediately-error/245/2
+                            log.error(f"{ex.message}")
+                            log_order(order)
+                            self.state = AddOrder.STATE_ERROR
+                            yield self
+                            continue
+                        elif ex.message == "Stop price would trigger immediately.":
                             # https://dev.binance.vision/t/order-would-trigger-immediately-error/245/2
                             raise
                     else:
                         raise
 
                 # C'est bon, il est passé
-                self.order = order
-                log.debug(f'Order \'{self.order["clientOrderId"]}\' created')
-                self.state = AddOrder.STATE_WAIT_ORDER
-                yield self
-
-            elif self.state == AddOrder.STATE_WAIT_ORDER:
-                # Ordre est passé, mais je n'ai pas de confirmation
-                # Donc, je le cherche dans la liste des ordres
-                orders = await client.get_all_orders(symbol=symbol)
-                pending_order = list(
-                    filter(lambda x: x.get("newClientOrderId", "") == self.order["newClientOrderId"], orders))
-                if not pending_order:
-                    # Finalement, l'ordre n'est pas passé ou est déjà validé, on le relance ?
-                    log.debug(f'Resend order {self.order["newClientOrderId"]}...')
-                    order = await client.create_order(**self.order)
-                    log.debug(f'Order {order["clientOrderId"]} created')
-                    self.order = order
-                else:
-                    # Il est passé, donc on reprend de là.
-                    self.order = pending_order[0]
-                    log.debug(f'Recover order {order["clientOrderId"]} from Binance')
+                new_order["side"] = self.order["side"]
+                new_order["type"] = self.order["type"]
+                if 'price' in self.order:
+                    new_order["price"] = self.order["price"]
+                if 'limit' in self.order:
+                    new_order["limit"] = self.order["limit"]
+                if 'quantity' in self.order:
+                    new_order["quantity"] = self.order["quantity"]
+                self.order = new_order
+                log_add_order(log, new_order, prefix)
                 self.state = AddOrder.STATE_ORDER_CONFIRMED
                 yield self
+
+            # elif self.state == AddOrder.STATE_WAIT_ORDER:
+            #     # Ordre est passé, mais je n'ai pas de confirmation
+            #     # Donc, je le cherche dans la liste des ordres
+            #     orders = await client.get_all_orders(symbol=symbol, limit=100)  # FIXME: startTime, endTime, limit
+            #     pending_order = list(
+            #         filter(lambda x: self.newClientOrderId in (x.get("newClientOrderId", ""),
+            #                                                    x.get("clientOrderId", "")) , orders))
+            #     if not pending_order:
+            #         # Finalement, l'ordre n'est pas passé ou est déjà validé, on le relance ?
+            #         log.debug(f'Resend order {self.order["newClientOrderId"]}...')
+            #         order = await client.create_order(**self.order)
+            #         log.debug(f'Order {order["clientOrderId"]} created')
+            #         self.order = order
+            #     else:
+            #         # Il est passé, donc on reprend de là.
+            #         self.order = pending_order[0]
+            #         log.debug(f'Recover order {order["clientOrderId"]} from Binance')
+            #     self.state = AddOrder.STATE_ORDER_CONFIRMED
+            #     yield self
 
             elif self.state == AddOrder.STATE_ORDER_CONFIRMED:
                 # Maintenant, il faut attendre son execution effective
@@ -173,22 +204,27 @@ class AddOrder(BotGenerator):
                 # Attend en websocket
                 try:
 
-                    log.debug("Wait event order status...")
+                    log.debug("Wait events...")
                     # FIXME: incompatible avec plusieurs ordres en meme temps
-                    msg = await wait_for(_get_user_msg(), timeout=STREAM_MSG_TIMEOUT)
+                    msg = await wait_for(_get_msg(), timeout=STREAM_MSG_TIMEOUT)
                     # See https://github.com/binance/binance-spot-api-docs/blob/master/user-data-stream.md
-                    if msg['e'] == "error":
+                    if msg.get('e') == "error":
                         # Web socket in error
                         self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
                         yield self
-                    elif msg['e'] == "executionReport" and \
+                    elif msg["_stream"].endswith("@user") and msg['e'] == "executionReport" and \
                             msg['s'] == symbol and \
                             msg['i'] == self['order']['orderId'] and \
                             msg['X'] != ORDER_STATUS_NEW:
                         self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
                         yield self
-                        log.info("Receive event for order")
-                    user_queue.task_done()
+                    # elif msg["_stream"].endswith("@trade") and \
+                    #         msg['e'] == "trade" and msg['s'] == self.order['symbol']:
+                    #     trade_price = Decimal(msg['p'])
+                    #     log.info(f"{trade_price=}")
+                    if cb:
+                        await cb(msg)
+                    mixte_queue.task_done()
                 except (asyncio.TimeoutError, Empty) as ex:
                     # Periodiquement, essaye en polling
                     self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING

@@ -14,7 +14,7 @@
       // or
       "total": 20, // Quote qty
 
-      "price": 34100,
+//      "price": 34100,
 
       "mode": "MARKET", // "LIMIT", "MARKET", "COND_LIMIT_ORDER", "COND_MARKET_ORDER"
 //      "order_price": 1000 // If "mode"== "cond_limit_order"
@@ -25,8 +25,8 @@
 //        "base": "last", // bid, ask, last (securisé via pre-ordre)
 //        "mode": "MARKET", // si "market"
 ////        "mode": "LIMIT", // si "market"
-//        "price": "0.2%", // or positive "3%"
-////        "trailing": "-5%"
+//        "price": "0.05%", // or positive "3%"
+//        "trailing": "-0.01%" // Start à la cible, si positif
 //      },
       "stop_loss": {
         "base": "last", // bid, ask , last (securisé via pre-ordre)
@@ -34,7 +34,7 @@
         "mode": "COND_LIMIT_ORDER", // "MARKET", "COND_LIMIT_ORDER"
 //        "price": 33200.0, // or "3%"
         "price": "-0.01%", // or "-3%"
-        "order_price": 34300.0, // si "cond_limit"
+//        "order_price": 34300.0, // si "cond_limit"
         "timeout": 5,
         "trailing": true
       }
