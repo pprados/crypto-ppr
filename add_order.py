@@ -172,29 +172,9 @@ class AddOrder(BotGenerator):
                 if 'quantity' in self.order:
                     new_order["quantity"] = self.order["quantity"]
                 self.order = new_order
-                log_add_order(log, new_order, prefix)
+                log_add_order(log, new_order, prefix+" Try to ")
                 self.state = AddOrder.STATE_ORDER_CONFIRMED
                 yield self
-
-            # elif self.state == AddOrder.STATE_WAIT_ORDER:
-            #     # Ordre est passé, mais je n'ai pas de confirmation
-            #     # Donc, je le cherche dans la liste des ordres
-            #     orders = await client.get_all_orders(symbol=symbol, limit=100)  # FIXME: startTime, endTime, limit
-            #     pending_order = list(
-            #         filter(lambda x: self.newClientOrderId in (x.get("newClientOrderId", ""),
-            #                                                    x.get("clientOrderId", "")) , orders))
-            #     if not pending_order:
-            #         # Finalement, l'ordre n'est pas passé ou est déjà validé, on le relance ?
-            #         log.debug(f'Resend order {self.order["newClientOrderId"]}...')
-            #         order = await client.create_order(**self.order)
-            #         log.debug(f'Order {order["clientOrderId"]} created')
-            #         self.order = order
-            #     else:
-            #         # Il est passé, donc on reprend de là.
-            #         self.order = pending_order[0]
-            #         log.debug(f'Recover order {order["clientOrderId"]} from Binance')
-            #     self.state = AddOrder.STATE_ORDER_CONFIRMED
-            #     yield self
 
             elif self.state == AddOrder.STATE_ORDER_CONFIRMED:
                 # Maintenant, il faut attendre son execution effective
@@ -236,7 +216,7 @@ class AddOrder(BotGenerator):
                 # See https://binance-docs.github.io/apidocs/spot/en/#public-api-definitions
                 if order['status'] == ORDER_STATUS_FILLED:  # or ORDER_STATUS_IOY_FILLED
                     update_wallet(wallet, order)
-                    log_order(log, order)
+                    log_order(log, order, prefix+" ****** ")
                     self.order = order
                     self.state = AddOrder.STATE_ORDER_FILLED
                     yield self
@@ -244,7 +224,7 @@ class AddOrder(BotGenerator):
                     # FIXME: Partially a traiter
                     log_order(log,order)
                     update_wallet(wallet, order)
-                    log_order(log, order)
+                    log_order(log, order, prefix)
                     if not self.continue_if_partially:
                         log.warning("PARTIALLY")
                         self.order = order
@@ -266,12 +246,10 @@ class AddOrder(BotGenerator):
                 elif order['status'] == ORDER_STATUS_NEW:
                     self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
                     yield self
-                    # FIXME: si on sait que le stream est done...
-                    # await sleep(POOLING_SLEEP)
                 else:
                     assert False, f"Unknown status {order['status']}"
             elif self.state == AddOrder.STATE_ORDER_FILLED:
-                pass
+                return
             elif self.state == AddOrder.STATE_CANCELING:
                 try:
                     await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])

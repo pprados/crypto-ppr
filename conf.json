@@ -13,29 +13,27 @@
       //"size": "10%",
       // or
       "total": 20, // Quote qty
-
 //      "price": 34100,
-
       "mode": "MARKET", // "LIMIT", "MARKET", "COND_LIMIT_ORDER", "COND_MARKET_ORDER"
 //      "order_price": 1000 // If "mode"== "cond_limit_order"
 
-//      "training_buy": "0.2%", // Or "-3%" si le prix maximum d'achat est à la limite
+//      "training_buy": "0.05%", // Or "-3%" si le prix maximum d'achat est à la limite
 
-//      "take_profit": {
-//        "base": "last", // bid, ask, last (securisé via pre-ordre)
-//        "mode": "MARKET", // si "market"
-////        "mode": "LIMIT", // si "market"
-//        "price": "0.05%", // or positive "3%"
-//        "trailing": "-0.01%" // Start à la cible, si positif
-//      },
+      "take_profit": {
+        "base": "bid", // *bid*, ask, last (securisé via pre-ordre)
+        "mode": "MARKET", // si "market"
+//        "mode": "LIMIT", // si "market"
+        "price": "0.1%", // price or positive %
+        "trailing": "-0.05%" // Start à la cible, si positif
+      },
       "stop_loss": {
-        "base": "last", // bid, ask , last (securisé via pre-ordre)
+        "base": "ask", // bid, *ask* , last (securisé via pre-ordre)
 //        "mode": "MARKET", // "market", "cond_limit"
         "mode": "COND_LIMIT_ORDER", // "MARKET", "COND_LIMIT_ORDER"
 //        "price": 33200.0, // or "3%"
-        "price": "-0.01%", // or "-3%"
+        "price": "-0.5%", // or "-3%"
 //        "order_price": 34300.0, // si "cond_limit"
-        "timeout": 5,
+        "timeout": 2,
         "trailing": true
       }
     }
