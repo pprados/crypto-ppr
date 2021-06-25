@@ -16,6 +16,19 @@ garantie que le code recevra l'acquittement de la création de l'ordre. En cas
 de plantage, il faut reprendre le contexte, puis s'assurer que l'ordre a bien
 été passé, ou sinon, l'appliquer à nouveau.
 
+# Création des API de tests:
+Suivre la procédure [ici](https://dev.binance.vision/t/binance-testnet-environments/99/3)
+pour créer des API classique et Future et les placer
+dans un .env
+```
+BINANCE_API_KEY=...
+BINANCE_API_SECRET=...
+BINANCE_API_TEST=true
+```
+Il est a noter que les API sont soit pour Spot, soit pour Future, mais pas les deux.
+
+Il n'y pas de testnet pour Margin.
+
 # Démarrage des bots
 Pour pouvoir gérer plusieurs bots en parallèle, le fichier `conf.json`
 permet d'indiquer la fonction async à appliquer pour le robot. 
@@ -166,7 +179,7 @@ afin de gérer le cas d'un crash lors de la manipulation des fichiers.
 
 # Utilisation de python-binance
 Tuto: https://algotrading101.com/learn/binance-python-api-guide/
-Il faut valoriser les variables d'environnements suivantes:
+Il faut valoriser les variables d'environements suivantes:
 ```
 BINANCE_API_KEY=...
 BINANCE_API_SECRET=...

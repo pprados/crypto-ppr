@@ -15,7 +15,7 @@ def get_now() -> int:
     """ En milliseconde"""
     global _now
     if not global_flags.simulation or not _now:
-        return datetime.now(timezone.utc).timestamp()
+        return datetime.now(timezone.utc).timestamp()*1000
     else:
         return _now
 

@@ -46,7 +46,7 @@ from binance.helpers import *
 
 from add_order import *
 from bot_generator import STOPPED
-from multiplex_stream import add_multiplex_socket
+from stream_multiplex import add_multiplex_socket
 from tools import atomic_load_json, generate_order_id, wait_queue_init, update_order, split_symbol, \
     atomic_save_json, check_order, log_order, json_order, log_add_order, to_usdt, str_order, Wallet
 
@@ -64,10 +64,6 @@ from simulate_client import *
 def _benefice(log: logging, symbol: str, wallet: Dict[str, Decimal], base_solde: Decimal, quote_solde: Decimal) -> None:
     base, quote = split_symbol(symbol)
     log.info(f"###### Result: {wallet[base] - base_solde} {base} / {wallet[quote] - quote_solde} {quote}")
-
-
-def log_wallet(log: logging, wallet: Wallet) -> None:
-    log.info("wallet:" + " ".join([f"{k}={v}" for k, v in wallet.items()]))
 
 
 MINIMUM_REDUCE_PRICE = Decimal("0.99")
@@ -229,8 +225,8 @@ class WinterSummerBot(BotGenerator):
             while True:
                 try:
                     # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
-                    msg = user_queue.get_nowait()
-                    if msg['msg'] == 'kill':
+                    msg = bot_queue.get_nowait()
+                    if msg['e'] == 'kill':
                         log.warning("Receive kill")
                         return
                 except QueueEmpty:
@@ -312,8 +308,8 @@ class WinterSummerBot(BotGenerator):
                             "quoteOrderQty": self.wallet[base],
                         }
                         order = update_order(symbol_info, current_price, order)
-                        log_add_order(log, order, prefix="For align, try to ")
                         await client.create_test_order(**json_order(str_order(order)))
+                        log_add_order(log, order, prefix="For align, try to ")
                         self.winter_order = await AddOrder.create(
                             client,
                             user_queue,
@@ -367,8 +363,8 @@ class WinterSummerBot(BotGenerator):
                     order = update_order(symbol_info, current_price, order)  # FIXME
                     # order['price'] = Decimal("1528.93")
                     # order['quantity'] = round_step_size(order['quantity'], symbol_info.lot.stepSize)
-                    log_add_order(log, order, prefix="For align, try to ")
                     await client.create_test_order(**json_order(str_order(order)))
+                    log_add_order(log, order, prefix="For align, try to ")
                     self.summer_order = await AddOrder.create(
                         client,
                         user_queue,

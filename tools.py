@@ -6,7 +6,7 @@ from decimal import Decimal
 from json import JSONDecodeError
 from pathlib import Path
 from random import randint
-from typing import Any, Tuple, Dict, Union
+from typing import Any, Tuple, Dict, Union, Optional
 
 import jstyleson as json
 from binance import AsyncClient
@@ -40,6 +40,12 @@ def _parse_order(order: Dict[str, Any]) -> Tuple[str, str, Decimal, Decimal]:
     if 'quoteOrderQty' in order:
         quote_order_qty = Decimal(order['quoteOrderQty'])
     return side, base, quote, quantity, quote_order_qty, price
+
+
+def log_wallet(log: logging, wallet: Wallet) -> None:
+    log.info("wallet:" + " ".join([f"{k}={v}" for k, v in wallet.items()]))
+
+
 
 
 def _serialize(obj):
@@ -132,16 +138,16 @@ async def wait_queue_init(input_queue: Queue) -> None:
     multiplex_queue_initilized = False
     while not user_queue_initilized or not multiplex_queue_initilized:
         msg = await input_queue.get()
-        if msg["from"] == "user_stream" and msg["msg"] == "initialized":
+        if msg["from"] == "stream_user" and msg["e"] == "stream_initialized":
             user_queue_initilized = True
-        if msg["from"] == "multiplex_stream" and msg["msg"] == "initialized":
+        if msg["from"] == "stream_multiplex" and msg["e"] == "stream_initialized":
             multiplex_queue_initilized = True
 
 def str_d(d:Decimal) -> str:
     s=f"{d:.20f}"
     return s.rstrip('0').rstrip('.') if '.' in s else s
 
-def update_order(wsi: Dict[str, Any], current_price: Decimal, order: Dict[str, Any], accept_upper=True) -> Dict[
+def update_order(wsi: Dict[str, Any], current_price: Optional[Decimal], order: Dict[str, Any], accept_upper=True) -> Dict[
     str, Any]:
     """ Ajute l'ordre pour être conforme aux contraintes de Binance.
      :param accept_upper True if accept to pay little more price. Else raise an exception.
@@ -153,7 +159,7 @@ def update_order(wsi: Dict[str, Any], current_price: Decimal, order: Dict[str, A
     assert 'quantity' in order or 'quoteOrderQty' in order
     if price and order["type"] == ORDER_TYPE_LIMIT:
         price = _adjuste_price(current_price, price, wsi)
-    elif order['type'] in (ORDER_TYPE_STOP_LOSS_LIMIT):
+    elif order['type'] in (ORDER_TYPE_TAKE_PROFIT_LIMIT,ORDER_TYPE_STOP_LOSS_LIMIT):
         price = _adjuste_price(current_price,price,wsi)
         stopPrice = _adjuste_price(current_price,stopPrice,wsi)
     elif order['type'] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER):
@@ -173,8 +179,9 @@ def update_order(wsi: Dict[str, Any], current_price: Decimal, order: Dict[str, A
         # MIN_NOTIONAL (https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md#min_notional)
         # notional is price * quantity
         if wsi.min_notional.applyToMarket and order["type"] == ORDER_TYPE_MARKET:
-            while current_price * quantity < wsi.min_notional.minNotional:
-                quantity += wsi.lot.minQty
+            if current_price:
+                while current_price * quantity < wsi.min_notional.minNotional:
+                    quantity += wsi.lot.minQty
         elif order["type"] == ORDER_TYPE_LIMIT:
             while price * quantity < wsi.min_notional.minNotional:
                 quantity += wsi.lot.minQty
@@ -199,7 +206,7 @@ def update_order(wsi: Dict[str, Any], current_price: Decimal, order: Dict[str, A
     return order
 
 
-def _adjuste_price(current_price, price, wsi):
+def _adjuste_price(current_price: Optional[Decimal], price:Decimal, wsi:Dict[str, Any]):
     # Ajustement éventuelle du prix
     if price < wsi.price.minPrice:
         price = wsi.price.minPrice
@@ -209,12 +216,13 @@ def _adjuste_price(current_price, price, wsi):
         price = price - (price - wsi.price.minPrice) % wsi.price.tickSize
     assert (price - wsi.price.minPrice) % wsi.price.tickSize == 0
     # percent
-    min_price = current_price * wsi.percent.multiplierDown
-    max_price = current_price * wsi.percent.multiplierUp
-    if price < min_price:
-        price = min_price
-    if price > max_price:
-        price = max_price
+    if current_price:
+        min_price = current_price * wsi.percent.multiplierDown
+        max_price = current_price * wsi.percent.multiplierUp
+        if price < min_price:
+            price = min_price
+        if price > max_price:
+            price = max_price
     return price
 
 
@@ -251,9 +259,10 @@ def check_order(wsi: Dict[str, Any], current_price: Decimal, order) -> bool:
         assert price % wsi.price.tickSize == 0
 
         # percent
-        min_price = current_price * wsi.percent.multiplierDown
-        max_price = current_price * wsi.percent.multiplierUp
-        assert min_price <= price <= max_price
+        if current_price:
+            min_price = current_price * wsi.percent.multiplierDown
+            max_price = current_price * wsi.percent.multiplierUp
+            assert min_price <= price <= max_price
     elif order['type'] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER):
             # Market lot size
             if quantity:
@@ -272,7 +281,7 @@ def check_order(wsi: Dict[str, Any], current_price: Decimal, order) -> bool:
 
     # MIN_NOTIONAL
     if price and quantity:
-        assert price * quantity > wsi.min_notional.minNotional
+        assert price * quantity >= wsi.min_notional.minNotional
 
     # TODO Max num order (global account)
     # TODO MAX_NUM_ALGO_ORDERS (global account)
@@ -310,19 +319,37 @@ async def to_usdt(client:AsyncClient,log:logging, asset:str,val:Decimal) -> Deci
 
 def _dump_order(log: logging, order: Dict[str, Any], prefix: str, suffix: str = ''):
     side, token, other, quantity, quote_order_qty, price = _parse_order(order)
-    str_price = "market" if order['type'] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER) else str_d(price)
-    if quantity:
-        log.info(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at {str_price} {other}{suffix}")
+    pre_suffix = ''
+    if order['type'] in (ORDER_TYPE_STOP_LOSS_LIMIT, ORDER_TYPE_STOP_LOSS):
+        pre_suffix = " for stop the loss"
+    if order['type'] in (ORDER_TYPE_TAKE_PROFIT_LIMIT,ORDER_TYPE_TAKE_PROFIT):
+        pre_suffix = " for take profit"
+    str_price = "MARKET" if order['type'] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER) else str_d(price)
+    if quantity and str_price!="MARKET":
+        log.info(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at {str_price} {other}{pre_suffix}{suffix}")
+    elif str_price == "MARKET":
+        if 'cummulativeQuoteQty' in order:
+            calculate_price = Decimal(order['cummulativeQuoteQty'])/Decimal(order['executedQty'])
+            log.info(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at {calculate_price} {other} {pre_suffix}{suffix}")
+        else:
+            if 'quoteOrderQty' in order:
+                log.info(
+                    f"{ts_to_str(get_now())}: {prefix}{side} {token} for {order['quoteOrderQty']} {other} at MARKET {pre_suffix}{suffix}")
+            else:
+                log.info(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at MARKET {pre_suffix}{suffix}")
     elif quote_order_qty:
-        log.info(f"{prefix}{side} {token} for {str_d(quote_order_qty)} {other} at {str_price} {token}{suffix}")
+        log.info(f"{prefix}{side} {token} for {str_d(quote_order_qty)} {other} at MARKET {pre_suffix}{suffix}")
 
 
 def log_add_order(log: logging, order: Dict[str, Any],prefix=None):
     _dump_order(log, order, f"Try to " if not prefix else prefix, "...")
 
 
-def log_order(log: logging, order: Dict[str, Any]):
-    _dump_order(log, order, "****** ")
+def log_order(log: logging, order: Dict[str, Any],prefix="****** "):
+    _dump_order(log, order, prefix)
+
+def log_wallet(log: logging, wallet: Wallet) -> None:
+    log.info("wallet:" + " ".join([f"{k}={v}" for k, v in wallet.items()]))
 
 
 def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:
@@ -331,13 +358,25 @@ def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:
     side, token, other, quantity, quote_order_qty, price = _parse_order(order)
     old_wallet = wallet.copy()
     if not price or price < 0:
-        logging.warning(f"Unknown price {price}")
-
-    if side == SIDE_BUY:
-        wallet[base] += quantity
-        wallet[quote] -= quantity * price  # FIXME: peut être négatif :-(
+        # Quote_qty
+        if side == SIDE_BUY:
+            wallet[base] += Decimal(order["origQty"])  # FIXME
+            wallet[quote] -= Decimal(order["cummulativeQuoteQty"])
+        else:
+            wallet[base] -= Decimal(order["origQty"])
+            wallet[quote] += Decimal(order["cummulativeQuoteQty"])
     else:
-        wallet[base] -= quantity
-        wallet[quote] += quantity * price
-    # FIXME assert wallet[base] >= 0
-    # FIXME assert wallet[quote] >= 0
+        if side == SIDE_BUY:
+            wallet[base] += quantity
+            wallet[quote] -= quantity * price
+        else:
+            wallet[base] -= quantity
+            wallet[quote] += quantity * price
+    assert wallet[base] >= 0
+    assert wallet[quote] >= 0
+
+def get_order_price(order:Order):
+    if order['type'] in (ORDER_TYPE_MARKET):
+        return Decimal(order["cummulativeQuoteQty"])/Decimal(order["origQty"])
+    else:
+        return Decimal(order['price'])

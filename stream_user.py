@@ -39,20 +39,21 @@ async def bot(client: AsyncClient,
                         agent.put_nowait(
                             {
                                 "from": bot_name,
-                                "msg": "initialized"
+                                "e": "stream_initialized"
 
                             })
                     start = False
                 try:
                     # Reception d'ordre venant de l'API. Par exemple, ajout de fond, arret, etc.
                     msg = input_queue.get_nowait()  # FIXME: lecture de 2 queues en //
-                    if msg['msg'] == 'kill':
+                    if msg['e'] == 'kill':
                         log.warning("Receive kill")
                         return
                 except QueueEmpty:
                     pass  # Ignore
 
                 msg = await mscm.recv()
+                msg['_stream']='@user'
                 # await asyncio.gather([loop.create_task(cb[0](msg, cb[1])) for cb in _call_back])
                 for cb in _call_back:
-                    cb(msg)
+                    await cb(msg)

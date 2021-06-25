@@ -1,9 +1,9 @@
-import decimal
 import logging
 import os
 import tracemalloc
 from asyncio import Queue, sleep, wait, FIRST_COMPLETED
 from asyncio import TimeoutError, get_event_loop
+from decimal import Decimal, getcontext, FloatOperation
 from importlib import import_module
 from pathlib import Path
 from typing import Dict
@@ -13,15 +13,16 @@ from binance import BinanceSocketManager
 from binance.exceptions import BinanceAPIException
 from dotenv import load_dotenv
 
+import global_flags
 from TypingClient import TypingClient
 from conf import MIN_RECONNECT_WAIT
-from simulate_client import SimulateClient, SimulateBinanceSocketManager, EndOfDatas
+from simulate_client import EndOfDatas, SimulateFixedValues
 from tools import atomic_load_json
-import global_flags
 
 api_key = os.environ["BINANCE_API_KEY"]
 api_secret = os.environ["BINANCE_API_SECRET"]
 test_net = os.environ.get("BINANCE_API_TEST", "false").lower() == "true"
+
 
 async def main():
     log = logging.getLogger(__name__)
@@ -43,10 +44,19 @@ async def main():
             # client = await AsyncClient.create(api_key, api_secret, testnet=test_net)
             while True:
                 # FIXME
-                # client = await TypingClient.create(api_key, api_secret, testnet=test_net)
-                # socket_manager = BinanceSocketManager(client._delegate, user_timeout=60)
-                global_flags.simulation = True
-                client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+                client = await TypingClient.create(api_key, api_secret, testnet=test_net)
+                # global_flags.simulation = True
+                # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+                # client = await SimulateRandomValues("BTCUSDT",min=33000,max=35000,step=10)
+                # client = SimulateFixedValues(
+                #     client,
+                #     "BTCUSDT",
+                #     [
+                #         Decimal(36000),
+                #         Decimal(35000),
+                #         Decimal(34900),
+                #         Decimal(34800),
+                #     ])
                 socket_manager = client.getBinanceSocketManager()
                 try:
                     await client.ping()
@@ -111,9 +121,9 @@ async def main():
                 queue.put_nowait(
                     {
                         "from": "_root",
-                        "msg": "kill"
+                        "e": "kill"
                     })
-            log.info("Sleep...")
+            log.info(f"Sleep {MIN_RECONNECT_WAIT}s before restart...")
             await sleep(MIN_RECONNECT_WAIT)
             for task in unfinished:
                 task.cancel()
@@ -126,9 +136,9 @@ async def main():
 
 
 if __name__ == "__main__":
-    ctx = decimal.getcontext()
+    ctx = getcontext()
     ctx.prec = 8
-    ctx.traps[decimal.FloatOperation] = True
+    ctx.traps[FloatOperation] = True
     while True:
         try:
             load_dotenv()
@@ -147,7 +157,7 @@ if __name__ == "__main__":
             # add the handlers to the root logger
             logging.getLogger().addHandler(fh)
 
-            decimal.getcontext().prec = 20
+            getcontext().prec = 20
             loop = get_event_loop()
             loop.run_until_complete(main())
         except ClientOSError as ex:

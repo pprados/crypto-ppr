@@ -24,6 +24,7 @@ from binance.exceptions import BinanceAPIException
 from bot_generator import BotGenerator
 from conf import STREAM_MSG_TIMEOUT
 from tools import log_order, update_wallet
+from stream_user import add_user_socket
 
 
 class AddOrder(BotGenerator):
@@ -99,6 +100,7 @@ class AddOrder(BotGenerator):
 
         def _get_user_msg():
             return user_queue.get()
+        add_user_socket(_get_user_msg)
 
         if self.state in (AddOrder.STATE_ORDER_CONFIRMED, AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET):
             # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours

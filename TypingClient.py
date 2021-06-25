@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, Any, Optional, List
 
-from binance import AsyncClient
+from binance import AsyncClient, BinanceSocketManager
 from binance.enums import HistoricalKlinesType
 
 from delegate_attribut import custom_inherit
@@ -205,6 +205,9 @@ class TypingClient():
 
     def __init__(self, delegate: AsyncClient):
         self._delegate = delegate
+
+    def getBinanceSocketManager(self):
+        return BinanceSocketManager(self._delegate, user_timeout=60)
 
     async def get_symbol_info(self, symbol: str) -> Dict[str,Any]:
         return _conv_symbolinfo(await self._delegate.get_symbol_info(symbol))

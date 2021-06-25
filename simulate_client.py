@@ -40,6 +40,7 @@ class SimulateFromHistory():
     GARDE_PERIOD = 30  # FIXME
 
     def __init__(self, symbol: str):  # TODO: debut et fin de simulation
+        global_flags.simulation = True
         self.symbol = symbol
         self._interval = "1d"
         self._datas = download_historical_values(symbol, self._interval)
@@ -140,60 +141,10 @@ class SimulateFromHistory():
                     raise EndOfDatas()  # TODO
         return result
 
+class AbstractSimulateValue(TypingClient):
+    def getBinanceSocketManager(self):
+        return SimulateBinanceSocketManager(self._delegate)
 
-class SimulateRandomValues():
-    """ Simulation via un génerator aléatoire dans un range. """
-
-    def __init__(self, socket_manager: 'SimulateBinanceSocketManager',
-                 symbol: str,
-                 min: int = 30000,
-                 max: int = 50000,
-                 step: int = 1000):
-        self._socket_manager = socket_manager
-        self.symbol = symbol
-        self._min = min
-        self._max = max
-        self._step = step
-        history = date_to_milliseconds("1 day ago UTC")
-        interval = interval_to_milliseconds("30m")
-        now = date_to_milliseconds("now")
-        iterator = self.generate_values()
-        self._is_started = False
-        self._history = [(dt, next(iterator), Decimal(1)) for dt in range(history, now, interval)]
-        self._is_started = True
-
-    @property
-    def now(self):
-        return date_to_milliseconds("now")
-
-    def add_order(self, ts: int, val: Decimal, vol: Decimal):
-        self._history.append([ts, val, vol])
-
-    def _gen_value(self) -> Decimal:
-        if self._is_started:
-            self._socket_manager.add_multicast_event({
-                # FIXME
-            })
-        return Decimal(random.randrange(self._min, self._max, self._step))
-
-    def generate_values(self) -> Generator[Decimal, Any, Any]:
-        # Generateur sans fin
-        return (self._gen_value() for i in iter(int, 1))
-
-    # [
-    #     1499040000000,      // Open time
-    #     "0.01634790",       // Open
-    #     "0.80000000",       // High
-    #     "0.01575800",       // Low
-    #     "0.01577100",       // Close
-    #     "148976.11427815",  // Volume
-    #     1499644799999,      // Close time
-    #     "2434.19055334",    // Quote asset volume
-    #     308,                // Number of trades
-    #     "1756.87402397",    // Taker buy base asset volume
-    #     "28.46694368",      // Taker buy quote asset volume
-    #     "17928899.62484339" // Ignore.
-    #   ]
     def get_historical_klines(self,
                               interval: str,
                               start_str: str,
@@ -236,6 +187,77 @@ class SimulateRandomValues():
             if open_time > now or len(result) > limit:
                 break
         return result
+
+
+class SimulateRandomValues(AbstractSimulateValue):
+    """ Simulation via un génerator aléatoire dans un range. """
+
+    def __init__(self,
+                 client: 'TypingClient',
+                 symbol: str,
+                 min: int = 30000,
+                 max: int = 50000,
+                 step: int = 1000):
+        self._delegate = client
+        self.symbol = symbol
+        self._min = min
+        self._max = max
+        self._step = step
+        history = date_to_milliseconds("1 day ago UTC")
+        interval = interval_to_milliseconds("30m")
+        now = date_to_milliseconds("now")
+        iterator = self.generate_values()
+        self._is_started = False
+        self._history = [(dt, next(iterator), Decimal(1)) for dt in range(history, now, interval)]
+        self._is_started = True
+
+    @property
+    def now(self):
+        return date_to_milliseconds("now")
+
+    def add_order(self, ts: int, val: Decimal, vol: Decimal):
+        self._history.append([ts, val, vol])
+
+    def _gen_value(self) -> Decimal:
+        if self._is_started:
+            self._socket_manager.add_multicast_event({
+                # FIXME
+            })
+        return Decimal(random.randrange(self._min, self._max, self._step))
+
+    def generate_values(self) -> Generator[Decimal, Any, Any]:
+        # Generateur sans fin
+        return (self._gen_value() for i in iter(int, 1))
+
+class SimulateFixedValues(AbstractSimulateValue):
+    """ Simulation via un génerator aléatoire dans un range. """
+
+    def __init__(self,
+                 client: 'TypingClient',
+                 symbol: str,
+                 values: List[Decimal]):
+        self._delegate = client
+        self.symbol = symbol
+        self._datas = values
+        # history = date_to_milliseconds("1 day ago UTC")
+        # interval = interval_to_milliseconds("30m")
+        # now = date_to_milliseconds("now")
+        # iterator = self.generate_values()
+        self._is_started = False
+        # self._history = [(dt, next(iterator), Decimal(1)) for dt in range(history, now, interval)]
+        self._history = []
+        self._is_started = True
+
+    @property
+    def now(self):
+        return date_to_milliseconds("now")
+
+    def add_order(self, ts: int, val: Decimal, vol: Decimal):
+        self._history.append([ts, val, vol])
+
+    def generate_values(self) -> Generator[Decimal, Any, Any]:
+        # Generateur sans fin
+        return (v for v in self._datas)
 
 
 # def generate_values() -> Iterator:
