@@ -1,21 +1,22 @@
 import logging
 import os
+import sys
 import tracemalloc
-from asyncio import Queue, sleep, wait, FIRST_COMPLETED
 from asyncio import TimeoutError, get_event_loop
+from asyncio import sleep, wait, FIRST_COMPLETED, AbstractEventLoop
 from decimal import Decimal, getcontext, FloatOperation
 from importlib import import_module
 from pathlib import Path
-from typing import Dict
 
+import click as click
 from aiohttp import ClientConnectorError, ClientOSError
-from binance import BinanceSocketManager
 from binance.exceptions import BinanceAPIException
 from dotenv import load_dotenv
 
 import global_flags
 from TypingClient import TypingClient
 from conf import MIN_RECONNECT_WAIT
+from events_queues import EventQueues
 from simulate_client import EndOfDatas, SimulateFixedValues
 from tools import atomic_load_json
 
@@ -24,16 +25,18 @@ api_secret = os.environ["BINANCE_API_SECRET"]
 test_net = os.environ.get("BINANCE_API_TEST", "false").lower() == "true"
 
 
-async def main():
+async def async_main(simulate: bool, loop: AbstractEventLoop):
     log = logging.getLogger(__name__)
     client = None
     socket_manager = None
     log.info("Start auto_trading")
     finished = []
     unfinished = []
+
+    client = await TypingClient.create(api_key, api_secret, testnet=test_net)
+
     while True:
         agents = []
-        bot_queues: Dict[str, Queue] = {}
         try:
             conf, rollback = atomic_load_json(Path("conf.json"))
             if rollback:
@@ -46,18 +49,18 @@ async def main():
                 # FIXME
                 client = await TypingClient.create(api_key, api_secret, testnet=test_net)
                 # global_flags.simulation = True
-                # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-                # client = await SimulateRandomValues("BTCUSDT",min=33000,max=35000,step=10)
-                # client = SimulateFixedValues(
-                #     client,
-                #     "BTCUSDT",
-                #     [
-                #         Decimal(36000),
-                #         Decimal(35000),
-                #         Decimal(34900),
-                #         Decimal(34800),
-                #     ])
-                socket_manager = client.getBinanceSocketManager()
+                if simulate:
+                    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+                    # client = await SimulateRandomValues("BTCUSDT",min=33000,max=35000,step=10)
+                    client = SimulateFixedValues(
+                        client,
+                        "BTCUSDT",
+                        [
+                            Decimal(36000),
+                            Decimal(35000),
+                            Decimal(34900),
+                            Decimal(34800),
+                        ])
                 try:
                     await client.ping()
                     break
@@ -81,6 +84,15 @@ async def main():
             for balance in client_account['balances']:
                 balance['agent_free'] = balance['free']
 
+            event_queues = EventQueues(client)
+            # FXIME: rendre la liste dynamique
+            event_queues.add_streams(
+                [
+                    # "btcusdt@aggTrade",
+                    "btcusdt@trade",
+                    "btcusdt@bookTicker"
+                ])
+
             for agent in conf:
                 bot_name = list(agent.keys())[0]
                 conf = agent[bot_name]
@@ -90,12 +102,11 @@ async def main():
                 module_path, fn = fn_name.rsplit(".", 1)
                 async_fun = getattr(import_module(module_path), fn)
 
-                bot_queues[bot_name] = Queue()  # Create a queue for the bot
-                print(bot_name)
+                event_queues.add_queue(bot_name)
                 agents.append(loop.create_task(async_fun(client,
                                                          client_account,
                                                          bot_name,
-                                                         bot_queues,
+                                                         event_queues,
                                                          conf)))
 
             # Tous les résultats sont agrégé dans le retour du gather.
@@ -117,12 +128,11 @@ async def main():
             if not ex_msg or ex_msg == 'None':
                 ex_msg = ex.__class__.__name__
             log.error(f"Binance communication error ({ex_msg})")
-            for queue in bot_queues.values():
-                queue.put_nowait(
-                    {
-                        "from": "_root",
-                        "e": "kill"
-                    })
+            event_queues.broadcast_msg(
+                {
+                    "stream": "@bot",
+                    "e": "kill"
+                })
             log.info(f"Sleep {MIN_RECONNECT_WAIT}s before restart...")
             await sleep(MIN_RECONNECT_WAIT)
             for task in unfinished:
@@ -135,7 +145,11 @@ async def main():
             break
 
 
-if __name__ == "__main__":
+@click.command(short_help='Start bots')
+@click.option("--simulate",
+              help='Simulate trading',
+              is_flag=True)
+def main(simulate: bool):
     ctx = getcontext()
     ctx.prec = 8
     ctx.traps[FloatOperation] = True
@@ -159,7 +173,7 @@ if __name__ == "__main__":
 
             getcontext().prec = 20
             loop = get_event_loop()
-            loop.run_until_complete(main())
+            loop.run_until_complete(async_main(simulate, loop))
         except ClientOSError as ex:
             logging.info("Connect reset by peer")
         except EndOfDatas as ex:
@@ -168,3 +182,7 @@ if __name__ == "__main__":
         except KeyboardInterrupt as ex:
             logging.info("Quit by user")
             break
+
+
+if __name__ == "__main__":
+    sys.exit(main())  # pylint: disable=no-value-for-parameter

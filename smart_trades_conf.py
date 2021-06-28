@@ -48,6 +48,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
     params.symbol = conf["symbol"]
     params.unit = Decimal(conf["unit"]) if "unit" in conf else None
     params.size = Decimal(conf['size'].strip('%')) / 100 if "size" in conf else None
+    # TODO: total en %
     params.total = Decimal(conf["total"]) if "total" in conf else None
     assert params.unit or params.size or params.total
 
@@ -66,7 +67,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
     params.use_take_profit = "take_profit" in conf
     if params.use_take_profit:
         take_profit_conf: Dict[str, Any] = conf["take_profit"]
-        params.take_profit_mode = take_profit_conf["mode"]
+        params.take_profit_mode = take_profit_conf.get("mode","bid")
         assert params.take_profit_mode in [MARKET, LIMIT, COND_MARKET_ORDER, COND_LIMIT_ORDER]
 
         params.take_profit_base = take_profit_conf["base"]
@@ -89,7 +90,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
     params.use_stop_loss = "stop_loss" in conf
     if params.use_stop_loss:
         stop_loss_conf: Dict[str, Any] = conf["stop_loss"]
-        params.stop_loss_mode = stop_loss_conf["mode"]  # "cond_limit", "market"
+        params.stop_loss_mode = stop_loss_conf.get("mode","ask")  # "cond_limit", "market"
         assert params.stop_loss_mode in [MARKET, COND_LIMIT_ORDER]
 
         params.stop_loss_base = stop_loss_conf["base"]
@@ -104,8 +105,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
         # TODO: Verifier la coérance du prix, via un check order ?
         params.stop_loss_order_price = Decimal(stop_loss_conf["order_price"]) if "order_price" in stop_loss_conf else None
         assert not params.stop_loss_order_price or params.stop_loss_mode == COND_LIMIT_ORDER
-        params.stop_loss_timeout = stop_loss_conf.get("timeout")*1000
+        params.stop_loss_timeout = stop_loss_conf.get("timeout",0)*1000
         params.stop_loss_trailing = stop_loss_conf.get("trailing")
-        assert not params.stop_loss_trailing or params.stop_loss_timeout
     # TODO: leverage
     return params

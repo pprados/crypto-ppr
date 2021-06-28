@@ -91,7 +91,7 @@ class WinterSummerBot(BotGenerator):
     STATE_ERROR = "error"
 
     async def _start(self,
-                     client: AsyncClient,
+                     client: TypingClient,
                      agent_queue: Queue,
                      log: logging,
                      init: Dict[str, str],
@@ -101,7 +101,7 @@ class WinterSummerBot(BotGenerator):
                                          log,
                                          init,
                                          **kwargs)
-        # # Réactive les générateurs pour les ordres
+        # TODO Réactive les générateurs pour les ordres ?
         # if 'winter_order' in init:
         #     init['winter_order'] = await AddOrder.create(client,user_queue,log,init['winter_order'])
         # if 'summer_order' in init:
@@ -155,7 +155,7 @@ class WinterSummerBot(BotGenerator):
 
             # L'enregistrement des streams ne doit être fait qu'au début du traitement
             # Peux recevoir des messages non demandés
-            # Dois rendre la main au plus vite. A vocation à modifier l'état pour laisser l'automate continuer
+            # Dois rendre la async_main au plus vite. A vocation à modifier l'état pour laisser l'automate continuer
             market_queue = asyncio.Queue()  # Queue to receive event from market
 
             async def event(msg: Dict[str, Any]) -> None:

@@ -9,6 +9,7 @@ from binance import AsyncClient
 # Classe abstract servant de base aux classes en charge d'un generator.
 # Une instance est compatible avec json. C'est un dictionnaire.
 # Il faut ajouter une méthode _start(...) qui doit créer un attribut _generator.
+from events_queues import EventQueues
 
 STOPPED="stopped"
 
@@ -16,12 +17,16 @@ class BotGenerator(dict):
     @classmethod
     async def create(cls,
                      client: AsyncClient,
-                     agent_queue: Queue,
+                     event_queues: EventQueues,
+                     queue:Queue,
                      log: logging,
                      init: Dict[str, Any]={},
                      **kwargs) -> 'AddOrder':
         init.pop("_generator", None)
-        bot_generator = await cls()._start(client, agent_queue, log, init, **kwargs)
+        bot_generator = await cls()._start(client,
+                                           event_queues,
+                                           queue,
+                                           log, init, **kwargs)
         assert '_generator' in bot_generator.__dict__
         return bot_generator
 

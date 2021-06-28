@@ -206,7 +206,7 @@ class TypingClient():
     def __init__(self, delegate: AsyncClient):
         self._delegate = delegate
 
-    def getBinanceSocketManager(self):
+    def get_socket_manager(self):
         return BinanceSocketManager(self._delegate, user_timeout=60)
 
     async def get_symbol_info(self, symbol: str) -> Dict[str,Any]:

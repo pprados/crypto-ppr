@@ -142,7 +142,7 @@ class SimulateFromHistory():
         return result
 
 class AbstractSimulateValue(TypingClient):
-    def getBinanceSocketManager(self):
+    def get_socket_manager(self):
         return SimulateBinanceSocketManager(self._delegate)
 
     def get_historical_klines(self,
@@ -586,7 +586,7 @@ class SimulateClient(TypingClient):
                                     klines_type: HistoricalKlinesType = HistoricalKlinesType.SPOT):
         return self._simulate_values.get_historical_klines(interval, start_str, end_str, limit, klines_type)
 
-    def getBinanceSocketManager(self):
+    def get_socket_manager(self):
         return SimulateBinanceSocketManager(self._delegate)
 
 

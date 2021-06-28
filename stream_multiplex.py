@@ -26,7 +26,7 @@ async def bot(client: TypingClient,
               agent_queues: List[Dict[str, Queue]],
               conf: Dict[str, Any]):
     log=logging.getLogger(bot_name)
-    socket_manager = client.getBinanceSocketManager()
+    socket_manager = client.get_socket_manager()
     input_queue = agent_queues[bot_name]  # Queue to receive msg for user or other agent
 
     await sleep(5)  # Time for waiting the initialisation of others agents

@@ -88,6 +88,7 @@ import global_flags
 from TypingClient import TypingClient
 from add_order import AddOrder
 from bot_generator import BotGenerator, STOPPED
+from events_queues import EventQueues
 from shared_time import sleep_speed, get_now
 from simulate_client import EndOfDatas, to_str_date
 from smart_trades_conf import *
@@ -140,14 +141,21 @@ class SmartTradeBot(BotGenerator):
     def is_error(self):
         return self.state == SmartTradeBot.STATE_ERROR
 
+    def is_finished(self):
+        return self.state == SmartTradeBot.STATE_FINISHED
+
+    #TODO: cancel
+
     async def _start(self,
-                     client: AsyncClient,
-                     agent_queue: Queue,
+                     client: TypingClient,
+                     event_queues: EventQueues,
+                     queue:Queue,
                      log: logging,
                      init: Dict[str, str],
                      **kwargs) -> 'WinterSummerBot':
         self._generator = self.generator(client,
-                                         agent_queue,
+                                         event_queues,
+                                         queue,
                                          log,
                                          init,
                                          **kwargs)
@@ -156,7 +164,8 @@ class SmartTradeBot(BotGenerator):
 
     async def generator(self,
                         client: AsyncClient,
-                        bot_queue: Queue,
+                        event_queues: EventQueues,
+                        queue:Queue,
                         log: logging,
                         init: Dict[str, str],  # Initial context
                         client_account: Dict[str, Any],
@@ -193,50 +202,74 @@ class SmartTradeBot(BotGenerator):
                             log.debug(f"Update buy condition = {self.buy_condition}")
 
         async def sl_trailing(msg: Dict[str, Any]) -> None:
+            trigger_price = None
+            if msg["_stream"].endswith("@bookTicker") and \
+                    msg["s"] == params.symbol:
+                if params.stop_loss_base == 'bid':
+                    trigger_price=Decimal(msg['b'])
+                elif params.stop_loss_base == 'ask':
+                    trigger_price = Decimal(msg['a'])
             if msg["_stream"].endswith("@trade") and \
                     msg['e'] == "trade" and msg['s'] == params.symbol:
-                trade_price = Decimal(msg['p'])
-                # log.info(f"{trade_price=}")
-                if trade_price <= self.active_stop_loss_condition:
-                    now = get_now()
-                    if self.active_stop_loss_timeout:
-                        if self.active_stop_loss_timeout + params.stop_loss_timeout > now:
-                            log.warning("****** Activate STOP-LOSS...")
-                            self.state = SmartTradeBot.STATE_STOP_LOSS
+                trigger_price = Decimal(msg['p'])
+            if trigger_price:
+                # log.info(f"{trigger_price=}")
+                if trigger_price <= self.active_stop_loss_condition:
+                    if params.stop_loss_trailing:
+                        now = get_now()
+                        if self.active_stop_loss_timeout:
+                            if self.active_stop_loss_timeout + params.stop_loss_timeout > now:
+                                log.warning("****** Activate STOP-LOSS...")
+                                self.state = SmartTradeBot.STATE_STOP_LOSS
+                        else:
+                            self.active_stop_loss_timeout = get_now()
+                            log.debug(f"Stop-loss start timer... {to_str_date(self.active_stop_loss_timeout)}")
                     else:
-                        self.active_stop_loss_timeout = get_now()
-                        log.debug(f"Stop-lost start timer... {to_str_date(self.active_stop_loss_timeout)}")
+                        log.warning("****** Activate STOP-LOSS (without trailing)...")
+                        self.state = SmartTradeBot.STATE_STOP_LOSS
                 else:
                     if self.active_stop_loss_timeout:
-                        log.debug("Deactivate stop-lost timeout")
+                        log.debug("Deactivate stop-loss timeout")
                         self.active_stop_loss_timeout = None
-                    new_stop_loss_condition = trade_price * (1 + self.stop_loss_percent)
+                    new_stop_loss_condition = trigger_price * (1 + self.stop_loss_percent)
                     if new_stop_loss_condition > self.active_stop_loss_condition:
                         self.active_stop_loss_condition = new_stop_loss_condition
                         log.debug(f"Update stop lost condition = {self.active_stop_loss_condition}")
 
-        async def take_profit_trailing(msg: Dict[str, Any]) -> None:
+        async def tp_trailing(msg: Dict[str, Any]) -> None:
+            trigger_price = None
+            if msg["_stream"].endswith("@bookTicker") and \
+                    msg["s"] == params.symbol:
+                if params.take_profit_base == 'bid':
+                    trigger_price=Decimal(msg['b'])
+                elif params.take_profit_base == 'ask':
+                    trigger_price = Decimal(msg['a'])
             if msg["_stream"].endswith("@trade") and \
                     msg['e'] == "trade" and msg['s'] == params.symbol:
-                trade_price = Decimal(msg['p'])
-                # log.info(f"{trade_price=}")
-                if trade_price >= self.active_take_profit_condition:
-                    if not self.active_take_profit_trailing:
-                        log.info("Activate trailing TP...")
-                        self.active_take_profit_trailing = True
-                        self.active_take_profit_sell = self.active_take_profit_condition \
-                                                       * params.take_profit_trailing
-                    if self.active_take_profit_trailing:
-                        if trade_price <= self.active_take_profit_sell:
-                            log.info(f"Try to take profit with {trade_price}...")
-                            self.state = SmartTradeBot.STATE_ACTIVATE_TAKE_PROFIT
-                        else:
-                            new_take_profit_sell = trade_price * (1 + params.take_profit_trailing)
-                            if new_take_profit_sell > self.active_take_profit_sell:
-                                self.active_take_profit_sell = new_take_profit_sell
-                                log.debug(f"Update take profit condition = {self.active_take_profit_sell}"
-                                         f"(+{(self.active_take_profit_sell / self.buy_order.price - 1) * 100}%)")
-
+                trigger_price = Decimal(msg['p'])
+            if trigger_price:
+                # log.info(f"{trigger_price=}")
+                if trigger_price >= self.active_take_profit_condition:
+                    if params.take_profit_trailing:
+                        if not self.active_take_profit_trailing:
+                            log.info("Activate trailing TP...")
+                            self.active_take_profit_trailing = True
+                            self.active_take_profit_sell = self.active_take_profit_condition \
+                                                           * params.take_profit_trailing
+                        if self.active_take_profit_trailing:
+                            if trigger_price <= self.active_take_profit_sell:
+                                log.info(f"Try to take-profit with {trigger_price}...")
+                                self.state = SmartTradeBot.STATE_ACTIVATE_TAKE_PROFIT
+                            else:
+                                new_take_profit_sell = trigger_price * (1 + params.take_profit_trailing)
+                                if new_take_profit_sell > self.active_take_profit_sell:
+                                    self.active_take_profit_sell = new_take_profit_sell
+                                    log.debug(f"Update take-profit condition = {self.active_take_profit_sell}"
+                                             f"(+{(self.active_take_profit_sell / self.buy_order.price - 1) * 100}%)")
+                    else:
+                        # TP sans trailing
+                        log.info(f"Try to take-profit with {trigger_price} (without trailing)...")
+                        self.state = SmartTradeBot.STATE_ACTIVATE_TAKE_PROFIT
         try:
             if not init:
                 # Premier départ
@@ -266,23 +299,8 @@ class SmartTradeBot(BotGenerator):
                     await client.cancel_order(symbol=order["symbol"], orderId=order["orderId"])
 
             # ---- Gestion des queues de communications asynchones
-            # Initialisation d'une queue mixte
-            # L'enregistrement des streams ne doit être fait qu'au début du traitement
-            # Peux recevoir des messages non demandés
-            # Dois rendre la main au plus vite. A vocation à modifier l'état pour laisser l'automate continuer
-            # FIXME: dynamic add ticker
-            mixte_queue = asyncio.Queue()  # Création d'une queue commune
-
-            async def put_mixte(msg: Dict[str, Any]) -> None:
-                mixte_queue.put_nowait(msg)
-
-            add_multiplex_socket(params.symbol.lower() + "@trade", put_mixte)
-            add_multiplex_socket(params.symbol.lower() + "@ticker", put_mixte)
-            add_multiplex_socket(params.symbol.lower() + "@bookTicker", put_mixte)
-            add_user_socket(put_mixte)
-
-            def _get_msg():
-                return mixte_queue.get()
+            # add_multiplex_socket(params.symbol.lower() + "@trade", put_mixte)
+            # add_multiplex_socket(params.symbol.lower() + "@bookTicker", put_mixte)
 
             # ---- Analyse des paramètres
             # Récupération des contraintes des devices
@@ -303,23 +321,17 @@ class SmartTradeBot(BotGenerator):
                 # Premier démarrage
                 log.info(f"Started")
 
-            # ----- Synchronisation entre les agents: Attend le démarrage des queues user et multiplex
-            wait_init_queue = True  # FIXME
-            if wait_init_queue:
-                await wait_queue_init(bot_queue)
-                wait_init_queue = False
-
             # Finite state machine
             # C'est ici que le bot travaille sans fin, en sauvant sont état à chaque transition
             while True:
-                try:
-                    # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
-                    msg = bot_queue.get_nowait()
-                    if msg['e'] == 'kill':
-                        log.warning("Receive kill")
-                        return
-                except QueueEmpty:
-                    pass  # Ignore
+                # try:
+                #     # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
+                #     msg = bot_queue.get_nowait()
+                #     if msg['e'] == 'kill':
+                #         log.warning("Receive kill")
+                #         return
+                # except QueueEmpty:
+                #     pass  # Ignore
 
                 if self.state == SmartTradeBot.STATE_INIT:
                     if params.training_buy:
@@ -341,7 +353,7 @@ class SmartTradeBot(BotGenerator):
                     yield self
 
                 elif self.state == SmartTradeBot.STATE_TRAILING_BUY:
-                    msg = await mixte_queue.get()
+                    msg = await queue.get()
                     check_error(msg)
                     t = self.state
                     await trailing_buy(msg)
@@ -389,7 +401,8 @@ class SmartTradeBot(BotGenerator):
                     # Mémorise l'ordre pour pouvoir le rejouer si nécessaire
                     self.buy_order = await AddOrder.create(
                         client,
-                        mixte_queue,
+                        event_queues,
+                        queue,
                         log,
                         order=order,
                         wallet=self.wallet,
@@ -415,21 +428,13 @@ class SmartTradeBot(BotGenerator):
                         # Rien à faire après l'achat
                         self.state = SmartTradeBot.STATE_FINISHED
                     else:
-                        if params.use_take_profit and not params.take_profit_trailing \
-                                and not params.use_stop_loss \
-                                and params.take_profit_base == "last":  # TODO: si params.take_profit_base != "last", à la main
-                            # TP sans SL ni trailing, sur une base 'last'
-                            # Peux utiliser un order TP
-                            self.state = SmartTradeBot.STATE_TP_ALONE
-                            yield self
-                        elif params.use_stop_loss and not params.use_take_profit and not params.stop_loss_trailing and params.use_stop_loss:
-                            # SL sans TP ni trailing, sur une base 'last'
-                            # Peux utiliser un order TP
-                            self.state = SmartTradeBot.STATE_SL_ALONE
-                            yield self
-                        else:
-                            # Initialise les trailings (j'ai au moins l'un des deux)
-                            if params.use_stop_loss and params.stop_loss_trailing:
+                        if params.use_stop_loss:
+                            if params.use_stop_loss and not params.use_take_profit and not params.stop_loss_trailing and params.use_stop_loss:
+                                # SL sans TP ni trailing, sur une base 'last'
+                                # Peux utiliser un order TP
+                                self.state = SmartTradeBot.STATE_SL_ALONE
+                                yield self
+                            else:
                                 # SL avec trailing. Ne peux pas utiliser un ordre SL.
                                 percent = params.stop_loss_percent
                                 if params.stop_loss_limit:
@@ -437,25 +442,88 @@ class SmartTradeBot(BotGenerator):
                                 self.stop_loss_percent = percent
                                 self.active_stop_loss_condition = self.buy_order.price * (1 + percent)
                                 self.active_stop_loss_timeout = None
-                                log.info(f"Set trailing stop-lost condition at {self.active_stop_loss_condition}")
+                                if params.stop_loss_trailing:
+                                    log.info(f"Set trailing stop-loss condition at {self.active_stop_loss_condition} ({params.stop_loss_base})")
+                                else:
+                                    log.info(
+                                        f"Set stop-loss condition at {self.active_stop_loss_condition} ({params.stop_loss_base})")
                                 self.state = SmartTradeBot.STATE_TRAILING
-                            if params.use_take_profit and params.take_profit_trailing:
-                                # TP avec trailing. Ne peux pas utiliser un ordre TP.
+
+                        if params.use_take_profit:
+                            if not params.take_profit_trailing \
+                                and not params.use_stop_loss \
+                                and params.take_profit_base == "last":  # TODO: si params.take_profit_base != "last", à la async_main
+                                # TP sans SL ni trailing, sur une base 'last'
+                                # Peux utiliser un order TP
+                                self.state = SmartTradeBot.STATE_TP_ALONE
+                            else:
+                                # TP avec ou sans trailing. Ne peux pas utiliser un ordre TP.
                                 percent = params.take_profit_limit_percent
                                 if params.take_profit_limit:
                                     percent = self.buy_order.price / params.take_profit_limit
                                 self.take_profit_percent = percent
                                 tp_price = self.buy_order.price * (1 + percent)
                                 self.active_take_profit_condition = tp_price
-                                self.active_take_profit_sell = tp_price * (1 + params.take_profit_trailing)
-                                assert self.active_take_profit_sell < self.active_take_profit_condition
-                                log.info(
-                                    f"Set trailing take profit condition at {self.active_take_profit_condition} (+{percent * 100}%)")
-                                log.info(f"Set trailing take profit, sell condition at {self.active_take_profit_sell} ("
-                                         f"+{(self.active_take_profit_sell / self.buy_order.price - 1) * 100}%)")
+                                if params.take_profit_trailing:
+                                    self.active_take_profit_sell = tp_price * (1 + params.take_profit_trailing)
+                                    assert self.active_take_profit_sell < self.active_take_profit_condition
+                                    log.info(
+                                        f"Set take-profit condition at "
+                                        f"{self.active_take_profit_condition} (+{percent * 100}%)"
+                                        f" ({params.take_profit_base})")
+                                    log.info(f"Set trailing take profit, sell condition at {self.active_take_profit_sell} ("
+                                             f"+{(self.active_take_profit_sell / self.buy_order.price - 1) * 100}%)")
+                                else:
+                                    log.info(f"Set take profit at {self.active_take_profit_condition} ("
+                                             f"+{(self.active_take_profit_condition / self.buy_order.price - 1) * 100}%)")
+
                                 self.active_take_profit_trailing = False
                                 self.state = SmartTradeBot.STATE_TRAILING
-                            yield self
+                        yield self
+
+                        # if params.use_take_profit and not params.take_profit_trailing \
+                        #         and not params.use_stop_loss \
+                        #         and params.take_profit_base == "last":  # TODO: si params.take_profit_base != "last", à la async_main
+                        #     # TP sans SL ni trailing, sur une base 'last'
+                        #     # Peux utiliser un order TP
+                        #     self.state = SmartTradeBot.STATE_TP_ALONE
+                        #     yield self
+                        # elif params.use_stop_loss and not params.use_take_profit and not params.stop_loss_trailing and params.use_stop_loss:
+                        #     # SL sans TP ni trailing, sur une base 'last'
+                        #     # Peux utiliser un order TP
+                        #     self.state = SmartTradeBot.STATE_SL_ALONE
+                        #     yield self
+                        # else:
+                        #     # Initialise les trailings (j'ai au moins l'un des deux)
+                        #     if params.use_stop_loss and params.stop_loss_trailing:
+                        #         # SL avec trailing. Ne peux pas utiliser un ordre SL.
+                        #         percent = params.stop_loss_percent
+                        #         if params.stop_loss_limit:
+                        #             percent = self.buy_order.price / params.stop_loss_limit
+                        #         self.stop_loss_percent = percent
+                        #         self.active_stop_loss_condition = self.buy_order.price * (1 + percent)
+                        #         self.active_stop_loss_timeout = None
+                        #         log.info(f"Set trailing stop-loss condition at {self.active_stop_loss_condition} ({params.stop_loss_base})")
+                        #         self.state = SmartTradeBot.STATE_TRAILING
+                        #     if params.use_take_profit and params.take_profit_trailing:
+                        #         # TP avec trailing. Ne peux pas utiliser un ordre TP.
+                        #         percent = params.take_profit_limit_percent
+                        #         if params.take_profit_limit:
+                        #             percent = self.buy_order.price / params.take_profit_limit
+                        #         self.take_profit_percent = percent
+                        #         tp_price = self.buy_order.price * (1 + percent)
+                        #         self.active_take_profit_condition = tp_price
+                        #         self.active_take_profit_sell = tp_price * (1 + params.take_profit_trailing)
+                        #         assert self.active_take_profit_sell < self.active_take_profit_condition
+                        #         log.info(
+                        #             f"Set trailing take-profit condition at "
+                        #             f"{self.active_take_profit_condition} (+{percent * 100}%)"
+                        #             f" ({params.take_profit_base})")
+                        #         log.info(f"Set trailing take profit, sell condition at {self.active_take_profit_sell} ("
+                        #                  f"+{(self.active_take_profit_sell / self.buy_order.price - 1) * 100}%)")
+                        #         self.active_take_profit_trailing = False
+                        #         self.state = SmartTradeBot.STATE_TRAILING
+                        #     yield self  # TODO: si pas trailing ?
 
                 # ---------- Gestion d'un ordre TP seul
                 elif self.state == SmartTradeBot.STATE_TP_ALONE:
@@ -495,7 +563,8 @@ class SmartTradeBot(BotGenerator):
                     order = update_order(symbol_info, None, order)
                     self.take_profit_order = await AddOrder.create(
                         client,
-                        mixte_queue,
+                        event_queues,
+                        queue,
                         log,
                         order=order,
                         wallet=self.wallet,
@@ -536,7 +605,7 @@ class SmartTradeBot(BotGenerator):
                             else:
                                 assert False, "Trouve une alternative"
                         else:
-                            # TODO: si params.stop_loss_base != "last", à la main
+                            # TODO: si params.stop_loss_base != "last", à la async_main
                             assert False, "trouver une alernative"
                     elif params.stop_loss_mode == COND_LIMIT_ORDER:  # FIXME: c'est quoi le "mode" ? C'est le Tracking method selection,
                         if params.stop_loss_base == "last":
@@ -550,14 +619,15 @@ class SmartTradeBot(BotGenerator):
                             order["stopPrice"] = stop_price
                             order["quantity"] = self.buy_order.quantity
                         else:
-                            # TODO: si params.stop_loss_base != "last", à la main
+                            # TODO: si params.stop_loss_base != "last", à la async_main
                             assert False, "Trouve une alternative"
                     else:
                         assert False, f"Invalid {params.stop_loss_mode}"
                     order = update_order(symbol_info, None, order)
                     self.stop_loss_order = await AddOrder.create(
                         client,
-                        mixte_queue,
+                        event_queues,
+                        queue,
                         log,
                         order=order,
                         wallet=self.wallet,
@@ -578,11 +648,11 @@ class SmartTradeBot(BotGenerator):
                 # ---------------- trailing
                 elif self.state == SmartTradeBot.STATE_TRAILING:
 
-                    msg = await mixte_queue.get()
+                    msg = await queue.get()
                     check_error(msg)
                     s = self.state
                     if params.use_take_profit:
-                        await take_profit_trailing(msg)
+                        await tp_trailing(msg)
                     # In second place, priority of stop loss ?
                     if params.use_stop_loss:
                         await sl_trailing(msg)
@@ -608,7 +678,8 @@ class SmartTradeBot(BotGenerator):
                     order = update_order(symbol_info, None, order)
                     self.stop_loss_order = await AddOrder.create(
                         client,
-                        mixte_queue,
+                        event_queues,
+                        queue,
                         log,
                         order=order,
                         wallet=self.wallet,
@@ -630,7 +701,8 @@ class SmartTradeBot(BotGenerator):
                     order = update_order(symbol_info, None, order)
                     self.take_profit_order = await AddOrder.create(
                         client,
-                        mixte_queue,
+                        event_queues,
+                        queue,
                         log,
                         order=order,
                         wallet=self.wallet,
@@ -705,12 +777,12 @@ class SmartTradeBot(BotGenerator):
 async def bot(client: TypingClient,
               client_account: Dict[str, Any],
               bot_name: str,
-              bots_queues: List[Dict[str, Queue]],
+              event_queues: EventQueues,
               conf: Dict[str, str]):
     path = Path("ctx", bot_name + ".json")
 
     log = logging.getLogger(bot_name)
-    bot_queue = bots_queues[bot_name]
+    bot_queue = event_queues[bot_name]
 
     # Lecture éventuelle du context sauvegardé
     state_for_generator = {}
@@ -718,14 +790,15 @@ async def bot(client: TypingClient,
         state_for_generator, rollback = atomic_load_json(path)
         assert not rollback
         log.info(f"Restart with state={state_for_generator['state']}")
-    # Puis initialisatio du generateur
+    # Puis initialisation du generateur
     bot_generator = await SmartTradeBot.create(client,
+                                               event_queues,
                                                bot_queue,
                                                log,
                                                state_for_generator,
                                                generator_name=bot_name,
                                                client_account=client_account,
-                                               agent_queues=bots_queues,
+                                               agent_queues=event_queues,
                                                conf=conf,
                                                )
     try:

@@ -23,6 +23,7 @@ from binance.exceptions import BinanceAPIException
 
 from bot_generator import BotGenerator
 from conf import STREAM_MSG_TIMEOUT
+from events_queues import EventQueues
 from tools import log_order, update_wallet, get_order_price, log_add_order
 from stream_user import add_user_socket
 
@@ -59,11 +60,13 @@ class AddOrder(BotGenerator):
 
     async def _start(self,
                      client: AsyncClient,
+                     event_queues:EventQueues,
                      user_queue: Queue,
                      log: logging,
                      init: Dict[str, str],
                      **kwargs) -> 'AddOrder':
         self._generator = self.generator(client,
+                                         event_queues,
                                          user_queue,
                                          log,
                                          init,
@@ -94,6 +97,7 @@ class AddOrder(BotGenerator):
 
     async def generator(self,
                         client,
+                        event_queues:EventQueues,
                         mixte_queue: Queue,
                         log: logging,
                         init: Dict[str, str],
@@ -171,8 +175,8 @@ class AddOrder(BotGenerator):
                     new_order["limit"] = self.order["limit"]
                 if 'quantity' in self.order:
                     new_order["quantity"] = self.order["quantity"]
+                log_add_order(log, self.order, prefix+" Try to ")
                 self.order = new_order
-                log_add_order(log, new_order, prefix+" Try to ")
                 self.state = AddOrder.STATE_ORDER_CONFIRMED
                 yield self
 

@@ -129,6 +129,7 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
 
 
 def generate_order_id(agent_name: str):
+    # TODO: aléa alpha sur 20 chars
     return agent_name + "-" + str(randint(100000, 999999))
 
 
