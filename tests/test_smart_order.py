@@ -5,6 +5,7 @@ from decimal import Decimal
 from unittest.mock import patch, MagicMock
 
 import pytest
+from binance.enums import ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET
 
 from events_queues import EventQueues
 from simulate_client import SimulateClient, AbstractSimulateValue, _SimulateUserSocket
@@ -46,12 +47,11 @@ async def init_test(conf, values):
     return agent_queue, bot_name, client, client_account, conf, event_queues
 
 
-async def test_simple_order_with_event():
+async def test_simple_order_with_unit_at_market_with_event():
     """ Test le passage d'un ordre simple, sans trailing, validé par un event """
     conf = {
         "symbol": "BTCUSDT",
         "unit": 0.1,
-        # "total": 20,
         "mode": "MARKET",
     }
     values = \
@@ -85,6 +85,91 @@ async def test_simple_order_with_event():
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
     await smart_trade.next()  # STATE_BUY_ORDER_FILLED
     assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+    assert smart_trade.buy_order.order['quantity'] == 0.1
+
+async def test_simple_order_with_total_at_market_with_event():
+    """ Test le passage d'un ordre simple, sans trailing, validé par un event """
+    conf = {
+        "symbol": "BTCUSDT",
+        "total": 110,
+        "mode": "MARKET",
+    }
+    values = \
+        [
+            Decimal(0),     # Init
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1100),  # STATE_ADD_ORDER, create_order()
+            Decimal(1100),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+        ]
+
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          event_queues,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await smart_trade.next()  # Init bot
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await smart_trade.next()  # STATE_INIT
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await smart_trade.next()  # STATE_WAIT_ADD_ORDER_FILLED, STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await smart_trade.next()  # STATE_BUY_ORDER_FILLED
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+    assert Decimal(smart_trade.buy_order.order['executedQty'])==Decimal('0.1')
+
+
+async def test_simple_order_with_size_at_market_with_event():
+    """ Test le passage d'un ordre simple, sans trailing, validé par un event """
+    conf = {
+        "symbol": "BTCUSDT",
+        "size": "10%",
+        "mode": "MARKET",
+    }
+    values = \
+        [
+            Decimal(0),     # Init
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1000),  # STATE_ADD_ORDER, create_order()
+            Decimal(1000),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+        ]
+
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          event_queues,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await smart_trade.next()  # Init bot
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await smart_trade.next()  # STATE_INIT
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await smart_trade.next()  # STATE_WAIT_ADD_ORDER_FILLED, STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await smart_trade.next()  # STATE_BUY_ORDER_FILLED
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+    assert Decimal(smart_trade.buy_order.order['executedQty'])==Decimal('0.1')
 
 
 @patch.object(_SimulateUserSocket, 'recv')
@@ -100,7 +185,6 @@ async def test_simple_order_with_with_pool(mock_recv_method):
     conf = {
         "symbol": "BTCUSDT",
         "unit": 0.1,
-        # "total": 20,
         "mode": "MARKET",
     }
     values = \
@@ -134,6 +218,51 @@ async def test_simple_order_with_with_pool(mock_recv_method):
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
     await smart_trade.next()  # STATE_BUY_ORDER_FILLED
     assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+
+
+async def test_simple_order_with_unit_at_limit_with_event():
+    """ Test le passage d'un ordre simple, sans trailing, validé par un event """
+    conf = {
+        "symbol": "BTCUSDT",
+        "unit": 0.1,
+        "mode": "LIMIT",  # FIXME: "COND_LIMIT_ORDER", "COND_MARKET_ORDER"
+        "price": "900"
+    }
+    values = \
+        [
+            Decimal(0),     # Init
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1100),  # STATE_ADD_ORDER, create_order()
+            Decimal(900),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+        ]
+
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          event_queues,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await smart_trade.next()  # Init bot
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await smart_trade.next()  # STATE_INIT
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await smart_trade.next()  # STATE_WAIT_ADD_ORDER_FILLED, STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await smart_trade.next()  # STATE_BUY_ORDER_FILLED
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_LIMIT
+    assert smart_trade.buy_order.order['price'] == Decimal(900)
+    assert smart_trade.buy_order.order['executedQty'] == "0.1"
 
 
 async def test_positive_trailing_buy_order_from_market():

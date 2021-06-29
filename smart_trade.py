@@ -378,8 +378,7 @@ class SmartTrade(BotGenerator):
                         quantity = params.unit  # TODO: unit ou quote ?
                         order["quantity"] = quantity
                     elif params.size:
-                        quantity = balance_quote * params.size
-                        order["quantity"] = quantity
+                        order["quoteOrderQty"] = balance_quote['free'] * params.size
                     elif params.total:
                         order["quoteOrderQty"] = params.total
 
@@ -388,6 +387,7 @@ class SmartTrade(BotGenerator):
                     elif params.mode == LIMIT:
                         order["type"] = ORDER_TYPE_LIMIT
                         order["timeInForce"] = TIME_IN_FORCE_GTC  # TODO: paramétrable ?
+                        order["price"] = params.price
                     elif params.mode == COND_LIMIT_ORDER:
                         # TODO Will be placed on the exchange order book when the conditional order triggers
                         pass

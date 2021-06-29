@@ -275,25 +275,38 @@ class SimulateClient(TypingClient):
     log_current = 0
     _symbol_info = {
         "BTCUSDT":
-            {'symbol': 'BTCUSDT', 'status': 'TRADING', 'baseAsset': 'BTC', 'baseAssetPrecision': 8,
-             'quoteAsset': 'USDT', 'quotePrecision': 8, 'quoteAssetPrecision': 8,
+            {'baseAsset': 'BTC',
+             'baseAssetPrecision': 8,
              'baseCommissionPrecision': 8,
-             'quoteCommissionPrecision': 8,
+             'filters': [
+                 {'filterType': 'PRICE_FILTER', 'minPrice': '0.01000000', 'maxPrice': '1000000.00000000',
+                  'tickSize': '0.01000000'},
+                 {'filterType': 'PERCENT_PRICE', 'multiplierUp': '5', 'multiplierDown': '0.2',
+                  'avgPriceMins': 5},
+                 {'filterType': 'LOT_SIZE', 'minQty': '0.00000100', 'maxQty': '900.00000000',
+                  'stepSize': '0.00000100'},
+                 {'filterType': 'MIN_NOTIONAL', 'minNotional': '10.00000000', 'applyToMarket': True,
+                  'avgPriceMins': 5},
+                 {'filterType': 'ICEBERG_PARTS', 'limit': 10},
+                 {'filterType': 'MARKET_LOT_SIZE', 'minQty': '0.00000000', 'maxQty': '100.00000000',
+                  'stepSize': '0.00000000'}, {'filterType': 'MAX_NUM_ORDERS', 'maxNumOrders': 200},
+                 {'filterType': 'MAX_NUM_ALGO_ORDERS', 'maxNumAlgoOrders': 5}],
+             'icebergAllowed': True,
+             'isSpotTradingAllowed': True,
+             'isMarginTradingAllowed': False,
+             'ocoAllowed': True,
              'orderTypes': ['LIMIT', 'LIMIT_MAKER', 'MARKET', 'STOP_LOSS_LIMIT', 'TAKE_PROFIT_LIMIT'],
-             'icebergAllowed': True, 'ocoAllowed': True, 'quoteOrderQtyMarketAllowed': True,
-             'isSpotTradingAllowed': True, 'isMarginTradingAllowed': False, 'filters': [
-                {'filterType': 'PRICE_FILTER', 'minPrice': '0.01000000', 'maxPrice': '1000000.00000000',
-                 'tickSize': '0.01000000'},
-                {'filterType': 'PERCENT_PRICE', 'multiplierUp': '5', 'multiplierDown': '0.2',
-                 'avgPriceMins': 5},
-                {'filterType': 'LOT_SIZE', 'minQty': '0.00000100', 'maxQty': '900.00000000',
-                 'stepSize': '0.00000100'},
-                {'filterType': 'MIN_NOTIONAL', 'minNotional': '10.00000000', 'applyToMarket': True,
-                 'avgPriceMins': 5},
-                {'filterType': 'ICEBERG_PARTS', 'limit': 10},
-                {'filterType': 'MARKET_LOT_SIZE', 'minQty': '0.00000000', 'maxQty': '100.00000000',
-                 'stepSize': '0.00000000'}, {'filterType': 'MAX_NUM_ORDERS', 'maxNumOrders': 200},
-                {'filterType': 'MAX_NUM_ALGO_ORDERS', 'maxNumAlgoOrders': 5}], 'permissions': ['SPOT']}
+             'permissions': ['SPOT'],
+             'price': {'maxPrice': Decimal(1000000), 'minPrice': Decimal(0.01), 'tickSize': Decimal(0.01)},
+             'quoteAsset': 'USDT',
+             'quotePrecision': 8,
+             'quoteAssetPrecision': 8,
+             'quoteCommissionPrecision': 8,
+             'quoteOrderQtyMarketAllowed': True,
+             'status': 'TRADING',
+             'symbol': 'BTCUSDT',
+
+             }
     }
 
     @classmethod
@@ -352,12 +365,16 @@ class SimulateClient(TypingClient):
 
     def apply_order(self, current_price: Decimal, order: Order):
         balance_base, balance_quote = self._split_balance(order["symbol"])
-        quantity = Decimal(order["quantity"])
         assert order["type"] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT)
+        if 'quantity' not in order:
+            quote_quantity = Decimal(order["quoteOrderQty"])
+            quantity = quote_quantity / current_price
+        else:
+            quantity = Decimal(order["quantity"])
         if order["type"] == ORDER_TYPE_MARKET:
-            order["price"] = current_price
             order["cummulativeQuoteQty"] = str_d(quantity)
             order["executedQty"] = str_d(quantity)
+            order["price"] = current_price
             order["status"] = ORDER_STATUS_FILLED
             del order["newClientOrderId"]
             self._simulate_values.add_order(order["transactTime"], current_price, quantity)
@@ -418,8 +435,8 @@ class SimulateClient(TypingClient):
 
     def add_order(self, order: Order) -> Order:
         balance_base, balance_quote = self._split_balance(order["symbol"])
-        quantity = Decimal(order["quantity"])
         if order["type"] in (ORDER_TYPE_LIMIT):
+            quantity = Decimal(order["quantity"])
             if order["side"] == SIDE_SELL:
                 balance_base["free"] -= quantity  # FIXME
                 balance_base["locked"] += quantity
@@ -460,8 +477,8 @@ class SimulateClient(TypingClient):
         for order in filter(lambda order: order["status"] in (ORDER_STATUS_NEW), self._orders):
             self.apply_order(self._current_value, order)
 
-    async def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
-        return SimulateClient._symbol_info[symbol]
+    # async def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
+    #     return SimulateClient._symbol_info[symbol]
 
     async def get_recent_trades(self, **kwargs) -> List[Dict[str, Any]]:
         result = await super().get_recent_trades(**kwargs)
@@ -575,9 +592,13 @@ class SimulateClient(TypingClient):
 
         new_order = order.copy()
         new_order["clientOrderId"] = order['newClientOrderId']
-        new_order["origQty"] = order["quantity"]
-        new_order["cummulativeQuoteQty"] = '0'
-        new_order["executedQty"] = '0'
+        if 'quantity' in order:
+            new_order["origQty"] = order["quantity"]
+        quote_qty = Decimal(0)  # Simplification de la gestion des quotes qty
+        if 'quoteOrderQty' in order:
+            quote_qty = order['quoteOrderQty']
+        new_order["cummulativeQuoteQty"] = quote_qty
+        new_order["executedQty"] = quote_qty
         new_order["fills"] = []
         self._order_id += 1
         new_order["orderId"] = self._order_id
@@ -642,6 +663,7 @@ class SimulateBinanceSocketManager():
 
     def add_multicast_event(self, event: Dict[str, Any]):
         self._queue_multiplex.put_nowait(event)
+
     def add_multicast_events(self, events: List[Dict[str, Any]]):
         for event in events:
             self.add_multicast_event(event)

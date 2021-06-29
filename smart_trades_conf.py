@@ -56,7 +56,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
 
     params.mode = conf["mode"]  # LIMIT, MARKET, cond_limit_order, cond_market_order
     assert params.mode in [MARKET, LIMIT, COND_MARKET_ORDER, COND_LIMIT_ORDER]
-    params.order_price = Decimal(conf["order_price"]) if "order_price" in conf else None
+    params.order_price = Decimal(conf["price"]) if "price" in conf else None
     assert params.mode == MARKET or params.order_price
     assert params.price or params.mode == MARKET
     params.training_buy = Decimal(conf['training'].strip('%')) / 100 if 'training' in conf else None
