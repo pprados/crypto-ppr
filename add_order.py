@@ -25,7 +25,6 @@ from bot_generator import BotGenerator
 from conf import STREAM_MSG_TIMEOUT
 from events_queues import EventQueues
 from tools import log_order, update_wallet, get_order_price, log_add_order
-from stream_user import add_user_socket
 
 
 class AddOrder(BotGenerator):

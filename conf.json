@@ -1,10 +1,4 @@
 [
-//  {
-//    "stream_multiplex": {}
-//  },
-//  {
-//    "stream_user": {}
-//  },
   {
     "smart_trade":  {
       "symbol": "BTCUSDT",
@@ -25,7 +19,7 @@
 
       // Il est possible d'apprendre du cours, pour acheter moin chère
       // si le cours remonte de 'training_buy'. Mais on suit la chute
-//      "training_buy": "0.05%", // Or "-3%" si le prix maximum d'achat est à la limite
+//      "training": "0.05%", // Or "-3%" si le prix maximum d'achat est à la limite
 
       // Il est possible d'indiquer simultanément des règles
       // de take profit.

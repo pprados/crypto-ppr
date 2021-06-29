@@ -4,16 +4,18 @@ import os
 from asyncio import Queue
 from decimal import Decimal
 
+import pytest
 from binance import BinanceSocketManager
 
 from bot_generator import STOPPED
-from winter_summer import bot as winter_summer_bot, WinterSummerBot
+from winter_summer import WinterSummerBot
 from simulate_client import SimulateClient, SimulateBinanceSocketManager, SimulationUserStream
 
 api_key = os.environ["BINANCE_API_KEY"]
 api_secret = os.environ["BINANCE_API_SECRET"]
 test_net = True
 
+@pytest.disable()
 def test_winter_summer():
 
     async def inf_loop():
