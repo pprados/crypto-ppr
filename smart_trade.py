@@ -73,7 +73,7 @@
 # J'attend que cela dépasse une resistance, alors je place mon ordre.
 import asyncio
 import logging
-from asyncio import Queue
+from asyncio import Queue, QueueEmpty, sleep
 from pathlib import Path
 
 import aiohttp
@@ -115,7 +115,7 @@ class SmartTrade(BotGenerator):
     STATE_BUY_ORDER_EXPIRED = "buy_order_expired"
 
     STATE_TP_ALONE = "tp_alone"
-    STATE_WAIT_TP_FILLED = "wait_tp_order_filled"
+    STATE_WAIT_TP_FILLED = "wait_tp_filled"
 
     STATE_SL_ALONE = "sl_alone"
     STATE_WAIT_SL_FILLED = "wait_sl_filled"
@@ -483,50 +483,6 @@ class SmartTrade(BotGenerator):
                                 self.state = SmartTrade.STATE_TRAILING
                         yield self
 
-                        # if params.use_take_profit and not params.take_profit_trailing \
-                        #         and not params.use_stop_loss \
-                        #         and params.take_profit_base == "last":  # TODO: si params.take_profit_base != "last", à la async_main
-                        #     # TP sans SL ni trailing, sur une base 'last'
-                        #     # Peux utiliser un order TP
-                        #     self.state = SmartTradeBot.STATE_TP_ALONE
-                        #     yield self
-                        # elif params.use_stop_loss and not params.use_take_profit and not params.stop_loss_trailing and params.use_stop_loss:
-                        #     # SL sans TP ni trailing, sur une base 'last'
-                        #     # Peux utiliser un order TP
-                        #     self.state = SmartTradeBot.STATE_SL_ALONE
-                        #     yield self
-                        # else:
-                        #     # Initialise les trailings (j'ai au moins l'un des deux)
-                        #     if params.use_stop_loss and params.stop_loss_trailing:
-                        #         # SL avec trailing. Ne peux pas utiliser un ordre SL.
-                        #         percent = params.stop_loss_percent
-                        #         if params.stop_loss_limit:
-                        #             percent = self.buy_order.price / params.stop_loss_limit
-                        #         self.stop_loss_percent = percent
-                        #         self.active_stop_loss_condition = self.buy_order.price * (1 + percent)
-                        #         self.active_stop_loss_timeout = None
-                        #         log.info(f"Set trailing stop-loss condition at {self.active_stop_loss_condition} ({params.stop_loss_base})")
-                        #         self.state = SmartTradeBot.STATE_TRAILING
-                        #     if params.use_take_profit and params.take_profit_trailing:
-                        #         # TP avec trailing. Ne peux pas utiliser un ordre TP.
-                        #         percent = params.take_profit_limit_percent
-                        #         if params.take_profit_limit:
-                        #             percent = self.buy_order.price / params.take_profit_limit
-                        #         self.take_profit_percent = percent
-                        #         tp_price = self.buy_order.price * (1 + percent)
-                        #         self.active_take_profit_condition = tp_price
-                        #         self.active_take_profit_sell = tp_price * (1 + params.take_profit_trailing)
-                        #         assert self.active_take_profit_sell < self.active_take_profit_condition
-                        #         log.info(
-                        #             f"Set trailing take-profit condition at "
-                        #             f"{self.active_take_profit_condition} (+{percent * 100}%)"
-                        #             f" ({params.take_profit_base})")
-                        #         log.info(f"Set trailing take profit, sell condition at {self.active_take_profit_sell} ("
-                        #                  f"+{(self.active_take_profit_sell / self.buy_order.price - 1) * 100}%)")
-                        #         self.active_take_profit_trailing = False
-                        #         self.state = SmartTradeBot.STATE_TRAILING
-                        #     yield self  # TODO: si pas trailing ?
-
                 # ---------- Gestion d'un ordre TP seul
                 elif self.state == SmartTrade.STATE_TP_ALONE:
                     # Take profit sans stop lost.
@@ -660,7 +616,6 @@ class SmartTrade(BotGenerator):
                         await sl_trailing(msg)
                     if s != self.state:
                         yield self
-
                 elif self.state == SmartTrade.STATE_STOP_LOSS:
                     # Add trade to stop loss
                     # TODO: ajouter un order plus tot ?
@@ -803,13 +758,18 @@ async def bot(client: TypingClient,
                                             conf=conf,
                                             )
     try:
+        previous = bot_generator.copy()
         while True:
             if await bot_generator.next() == STOPPED:
                 break
             if not global_flags.simulation:
                 if bot_generator.is_error():
                     raise ValueError("ERROR state not saved")  # FIXME
-                # FIXME atomic_save_json(bot_generator, path)
+                if previous != bot_generator:
+                    # TODO: faire cela dans les autres bots
+                    # Ne sauve que s'il y a un changement, pour économiser la carte SD
+                    # FIXME atomic_save_json(bot_generator, path)
+                    previous = bot_generator.copy()
     except EndOfDatas:
         log.info("######: Final result of simulation:")
         log_wallet(log, bot_generator.wallet)

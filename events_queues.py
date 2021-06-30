@@ -43,7 +43,7 @@ class EventQueues:
 
             class ReconnectHandle():
                 def cancel(self):
-                    print("cancel")
+                    print("FIXME cancel")  # FIXME
 
             self._multiplex_socket.reconnect_handle = ReconnectHandle()
             self._multiplex_socket.MIN_RECONNECT_WAIT = 1.0
@@ -68,7 +68,6 @@ async def _manage_multiplex_stream(mixed_queue:EventQueues, socket:ReconnectingW
             assert msg
             m = msg['data']
             m['_stream'] = msg['stream']
-            # print(m)
             mixed_queue.broadcast_msg(m)
 
 async def _manage_user_stream(mixed_queue:EventQueues, socket:ReconnectingWebsocket) -> None:
@@ -77,6 +76,5 @@ async def _manage_user_stream(mixed_queue:EventQueues, socket:ReconnectingWebsoc
             msg = await mscm.recv()
             assert msg
             msg['_stream'] = "@user"
-            # print(msg)
             mixed_queue.broadcast_msg(msg)
 

@@ -33,6 +33,7 @@
         "price": "0.01%", // price or positive %
         // et il est possible d'apprendre, jusqu'a une baisse
         // de 'trailing'
+        // "auto_activate": True // Calcul de la volatilité voir http://boursegestionportefeuille.e-monsite.com/pages/calcul-de-volatilite-bourse.html
 //        "trailing": "-0.05%", // Start à la cible, si positif
 
         // TODO: tp mini

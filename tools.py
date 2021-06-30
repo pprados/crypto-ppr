@@ -183,12 +183,12 @@ def update_order(wsi: Dict[str, Any], current_price: Optional[Decimal], order: D
             if current_price:
                 while current_price * quantity < wsi.min_notional.minNotional:
                     quantity += wsi.lot.minQty
-        elif order["type"] == ORDER_TYPE_LIMIT:
+        elif order["type"] in (ORDER_TYPE_LIMIT,ORDER_TYPE_TAKE_PROFIT_LIMIT,ORDER_TYPE_STOP_LOSS_LIMIT):
             while price * quantity < wsi.min_notional.minNotional:
                 quantity += wsi.lot.minQty
 
         if not accept_upper:
-            if order["type"] == ORDER_TYPE_LIMIT:
+            if order["type"] in (ORDER_TYPE_LIMIT,ORDER_TYPE_TAKE_PROFIT_LIMIT,ORDER_TYPE_STOP_LOSS_LIMIT):
                 if order['quantity'] * order['price'] < quantity * price:
                     raise ValueError("Impossible to update the price or quantity")
             elif quantity > order['quantity']:
@@ -377,7 +377,7 @@ def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:
     assert wallet[quote] >= 0
 
 def get_order_price(order:Order):
-    if order['type'] in (ORDER_TYPE_MARKET):
-        return Decimal(order["cummulativeQuoteQty"])/Decimal(order["origQty"])
-    else:
+    if 'price' in order:
         return Decimal(order['price'])
+    else:
+        return Decimal(order["cummulativeQuoteQty"])/Decimal(order["origQty"])

@@ -12,7 +12,8 @@ from typing import Dict, Any, Optional, List, Tuple, Iterable, Generator
 
 from binance import AsyncClient, BinanceSocketManager
 from binance.enums import HistoricalKlinesType, ORDER_TYPE_MARKET, SIDE_SELL, ORDER_TYPE_LIMIT, SIDE_BUY, \
-    ORDER_STATUS_FILLED, ORDER_STATUS_NEW, ORDER_STATUS_CANCELED
+    ORDER_STATUS_FILLED, ORDER_STATUS_NEW, ORDER_STATUS_CANCELED, ORDER_TYPE_STOP_LOSS_LIMIT, \
+    ORDER_TYPE_TAKE_PROFIT_LIMIT
 from binance.helpers import interval_to_milliseconds, date_to_milliseconds
 
 from TypingClient import TypingClient
@@ -272,6 +273,11 @@ class SimulateFixedValues(AbstractSimulateValue):
 # et les dates en Date.
 # Cette classe va évoluer au fur et à mesure des besoins.
 class SimulateClient(TypingClient):
+    """ Simulation d'un client Binance.
+    Certaines méthodes sont surchargées pour implémenter des simulations.
+    Toutes les autres sont déléguées à un client Binance classique (donc, peut utiliser le réseau)
+    Pour avancer le temps, il faut invoquer tick().
+    """
     log_current = 0
     _symbol_info = {
         "BTCUSDT":
@@ -363,9 +369,9 @@ class SimulateClient(TypingClient):
         balance_quote = next(filter(lambda x: x['asset'] == quote, self._account['balances']))
         return balance_base, balance_quote
 
+    # TODO: voir quand faire un TP en mode buy. Lorsqu'on inverse les devises ?
     def apply_order(self, current_price: Decimal, order: Order):
         balance_base, balance_quote = self._split_balance(order["symbol"])
-        assert order["type"] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT)
         if 'quantity' not in order:
             quote_quantity = Decimal(order["quoteOrderQty"])
             quantity = quote_quantity / current_price
@@ -385,7 +391,7 @@ class SimulateClient(TypingClient):
                 'X': order["status"]
             })
 
-        elif order["type"] == ORDER_TYPE_LIMIT:
+        elif order["type"] in (ORDER_TYPE_LIMIT,ORDER_TYPE_TAKE_PROFIT_LIMIT):
             # TODO: timeInForce
             limit = Decimal(order["price"])
             if order["side"] == SIDE_SELL and current_price >= limit:
@@ -403,7 +409,6 @@ class SimulateClient(TypingClient):
                     'X': order["status"]
                 })
                 self._simulate_values.add_order(order["transactTime"], current_price, quantity)
-                # del order["newClientOrderId"]
             elif order["side"] == SIDE_BUY and current_price <= limit:
                 order["price"] = current_price
                 order["cummulativeQuoteQty"] = str_d(quantity)
@@ -413,7 +418,6 @@ class SimulateClient(TypingClient):
                 balance_quote["free"] += quantity * order["price"]
                 balance_quote["free"] -= quantity * current_price
                 balance_base["free"] += quantity
-                # del order["newClientOrderId"]
                 self._socket_manager.add_user_socket_event({  # TODO: vérifier la capture du message, puis simplifier
                     'e': "executionReport",
                     's': order["symbol"],
@@ -421,7 +425,8 @@ class SimulateClient(TypingClient):
                     'X': order["status"]
                 })
                 self._simulate_values.add_order(order["transactTime"], current_price, quantity)  # FIXME: + ou - ?
-
+            else:
+                assert NotImplementedError()
         else:
             assert False, "Order type not managed"
 
@@ -525,71 +530,9 @@ class SimulateClient(TypingClient):
             return super().get_symbol_ticker(**params)
 
     async def create_test_order(self, **params):
-        """Test new order creation and signature/recvWindow long. Creates and validates a new order but does not send it into the matching engine.
-
-        https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md#test-new-order-trade
-
-        :param symbol: required
-        :type symbol: str
-        :param side: required
-        :type side: str
-        :param type: required
-        :type type: str
-        :param timeInForce: required if limit order
-        :type timeInForce: str
-        :param quantity: required
-        :type quantity: decimal
-        :param price: required
-        :type price: str
-        :param newClientOrderId: A unique id for the order. Automatically generated if not sent.
-        :type newClientOrderId: str
-        :param icebergQty: Used with iceberg orders
-        :type icebergQty: decimal
-        :param newOrderRespType: Set the response JSON. ACK, RESULT, or FULL; default: RESULT.
-        :type newOrderRespType: str
-        :param recvWindow: The number of milliseconds the request is valid for
-        :type recvWindow: int
-
-        :returns: API response
-        """
         return
 
     async def create_order(self, **order):
-        """Send in a new order
-
-        Any order with an icebergQty MUST have timeInForce set to GTC.
-
-        https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md#new-order--trade
-
-        :param symbol: required
-        :type symbol: str
-        :param side: required
-        :type side: str
-        :param type: required
-        :type type: str
-        :param timeInForce: required if limit order
-        :type timeInForce: str
-        :param quantity: required
-        :type quantity: decimal
-        :param quoteOrderQty: amount the user wants to spend (when buying) or receive (when selling)
-            of the quote asset, applicable to MARKET orders
-        :type quoteOrderQty: decimal
-        :param price: required
-        :type price: str
-        :param newClientOrderId: A unique id for the order. Automatically generated if not sent.
-        :type newClientOrderId: str
-        :param icebergQty: Used with LIMIT, STOP_LOSS_LIMIT, and TAKE_PROFIT_LIMIT to create an iceberg order.
-        :type icebergQty: decimal
-        :param newOrderRespType: Set the response JSON. ACK, RESULT, or FULL; default: RESULT.
-        :type newOrderRespType: str
-        :param recvWindow: the number of milliseconds the request is valid for
-        :type recvWindow: int
-
-        :returns: API response
-
-        Response ACK:
-    """
-
         new_order = order.copy()
         new_order["clientOrderId"] = order['newClientOrderId']
         if 'quantity' in order:
@@ -647,6 +590,10 @@ class SimulateClient(TypingClient):
 
 @custom_inherit(AsyncClient, delegator='_delegate')
 class SimulateBinanceSocketManager():
+    """
+    Simule le socket manager. Pour alimenter les queues, il faut utiliser
+    les méthodes add_user_socket_event() et add_multicast_event()
+    """
     def __init__(self, delegate: BinanceSocketManager):
         self._delegate = delegate
         self._queue_user = Queue()
