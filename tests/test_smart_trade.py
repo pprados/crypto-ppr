@@ -266,6 +266,93 @@ async def test_simple_order_with_unit_at_limit_with_event():
     assert smart_trade.buy_order.order['executedQty'] == "0.1"
 
 
+async def test_simple_order_with_cond_limit_order_at_market_with_event():
+    """ Test le passage d'un ordre simple, sur unit, avec condition limit, sans trailing, validé par un event """
+    conf = {
+        "symbol": "BTCUSDT",
+        "unit": 0.1,
+        "mode": "COND_LIMIT_ORDER",
+        "price": 1000,
+        "order_price": 1001,
+    }
+    values = \
+        [
+            Decimal(0),  # Init
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1100),  # STATE_ADD_ORDER, create_order()
+            Decimal(1100),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+        ]
+
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          event_queues,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await smart_trade.next()
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await smart_trade.next()
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await smart_trade.next()
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await smart_trade.next()
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+    assert smart_trade.buy_order.order['quantity'] == 0.1
+
+
+async def test_simple_order_with_cond_market_order_at_market_with_event():
+    """ Test le passage d'un ordre simple, sur unit, avec condition market, sans trailing, validé par un event """
+    conf = {
+        "symbol": "BTCUSDT",
+        "unit": 0.1,
+        "mode": "COND_MARKET_ORDER",
+        "price": 1001,
+    }
+    values = \
+        [
+            Decimal(0),  # Init
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1100),  # STATE_ADD_ORDER, create_order()
+            Decimal(1100),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+        ]
+
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          event_queues,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await smart_trade.next()
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await smart_trade.next()
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await smart_trade.next()
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await smart_trade.next()
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+    assert smart_trade.buy_order.order['quantity'] == 0.1
+
+
 async def test_positive_trailing_buy_order_from_market():
     """ Test le passage d'un ordre simple, avec trailing positif """
     conf = {
