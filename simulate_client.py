@@ -88,6 +88,10 @@ class AbstractSimulateValue(TypingClient):
             if open_time > now or len(result) > limit:
                 break
         return result
+    @property
+    def now(self):
+        return get_now()
+
 
 
 class SimulateFromHistory(AbstractSimulateValue):
@@ -112,10 +116,6 @@ class SimulateFromHistory(AbstractSimulateValue):
             set_now(row['unix'] + 3)
             yield Decimal(str(row['close']))
         raise EndOfDatas(Decimal(str(row['close'])))
-
-    @property
-    def now(self):
-        return get_now()
 
     def get_klines(self,
                    symbol: str,
@@ -425,8 +425,40 @@ class SimulateClient(TypingClient):
                     'X': order["status"]
                 })
                 self._simulate_values.add_order(order["transactTime"], current_price, quantity)  # FIXME: + ou - ?
-            else:
-                assert NotImplementedError()
+        elif order["type"] in (ORDER_TYPE_STOP_LOSS_LIMIT):
+            limit = Decimal(order["stopPrice"])
+            if order["side"] == SIDE_SELL and current_price <= limit:
+                order["price"] = current_price
+                order["cummulativeQuoteQty"] = str_d(quantity)
+                order["executedQty"] = str_d(quantity)
+                order["status"] = ORDER_STATUS_FILLED
+                balance_base["locked"] -= quantity
+                # Plus nécessaire, c'est vendu balance_base["free"] += quantity
+                balance_quote["free"] += quantity * current_price
+                self._socket_manager.add_user_socket_event({
+                    'e': "executionReport",
+                    's': order["symbol"],
+                    'i': order["orderId"],
+                    'X': order["status"]
+                })
+                self._simulate_values.add_order(order["transactTime"], current_price, quantity)
+            elif order["side"] == SIDE_BUY and current_price >= limit:
+                order["price"] = current_price
+                order["cummulativeQuoteQty"] = str_d(quantity)
+                order["executedQty"] = str_d(quantity)
+                order["status"] = ORDER_STATUS_FILLED
+                balance_quote["locked"] -= quantity * order["price"]
+                balance_quote["free"] += quantity * order["price"]
+                balance_quote["free"] -= quantity * current_price
+                balance_base["free"] += quantity
+                self._socket_manager.add_user_socket_event(
+                    {
+                        'e': "executionReport",
+                        's': order["symbol"],
+                        'i': order["orderId"],
+                        'X': order["status"]
+                    })
+                self._simulate_values.add_order(order["transactTime"], current_price, quantity)  # FIXME: + ou - ?
         else:
             assert False, "Order type not managed"
 

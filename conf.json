@@ -61,7 +61,7 @@
         // et il es possible d'apprendre de la baisse
         // pour remontrer progressivement le SL
         // au fur et à mesure de la monté du cours
-//        "trailing": true
+//        "trailing": true // FIXME: utiliser trailing="3%" et price pour order_price ?
       }
     }
   }

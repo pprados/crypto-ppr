@@ -127,7 +127,7 @@ class AddOrder(BotGenerator):
 
         # Finite state machine
         while True:
-            log.debug(f"filled_order=> {self.state}")
+
             if self.state == AddOrder.STATE_INIT:
                 self.state = AddOrder.STATE_ADD_ORDER
             elif self.state == AddOrder.STATE_ADD_ORDER:
