@@ -46,18 +46,18 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
     params = SmartTradeParameters()
 
     params.symbol = conf["symbol"]
-    params.unit = Decimal(conf["unit"]) if "unit" in conf else None
+    params.unit = Decimal(str(conf["unit"])) if "unit" in conf else None
     params.size = Decimal(conf['size'].strip('%')) / 100 if "size" in conf else None
     # TODO: total en %
-    params.total = Decimal(conf["total"]) if "total" in conf else None
+    params.total = Decimal(str(conf["total"])) if "total" in conf else None
     assert params.unit or params.size or params.total
 
-    params.price = Decimal(conf.get("price")) if "price" in conf else None
+    params.price = Decimal(str(conf.get("price"))) if "price" in conf else None
 
     params.mode = conf["mode"]  # LIMIT, MARKET, cond_limit_order, cond_market_order
     assert params.mode in [MARKET, LIMIT, COND_MARKET_ORDER, COND_LIMIT_ORDER]
-    params.price = Decimal(conf["price"]) if "price" in conf else None
-    params.order_price = Decimal(conf["order_price"]) if "order_price" in conf else None
+    params.price = Decimal(str(conf["price"])) if "price" in conf else None
+    params.order_price = Decimal(str(conf["order_price"])) if "order_price" in conf else None
     assert params.mode not in (COND_LIMIT_ORDER) or params.order_price
     assert params.mode in (MARKET,COND_MARKET_ORDER) or params.price
     params.training_buy = Decimal(conf['training'].strip('%')) / 100 if 'training' in conf else None
@@ -79,7 +79,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
             params.take_profit_limit_percent = Decimal(l.strip('%')) / 100
             assert params.take_profit_limit_percent >= 0
         else:
-            params.take_profit_limit = Decimal(l)
+            params.take_profit_limit = Decimal(str(l))
         assert params.take_profit_base or params.take_profit_mode == LIMIT
         assert params.take_profit_limit_percent or params.take_profit_limit
         # TODO: split target
@@ -103,10 +103,10 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
             params.stop_loss_percent = Decimal(l.strip('%')) / 100
             assert params.stop_loss_percent <= 0  # Pour un BUY
         else:
-            params.stop_loss_limit = Decimal(l)
+            params.stop_loss_limit = Decimal(str(l))
         # TODO: Verifier la coérance du prix, via un check order ?
         params.stop_loss_order_price = Decimal(
-            stop_loss_conf["order_price"]) if "order_price" in stop_loss_conf else None
+            str(stop_loss_conf["order_price"])) if "order_price" in stop_loss_conf else None
         assert not params.stop_loss_order_price or params.stop_loss_mode == COND_LIMIT_ORDER
         params.stop_loss_timeout = stop_loss_conf.get("timeout", 0) * 1000
         params.stop_loss_trailing = stop_loss_conf.get("trailing")

@@ -155,7 +155,7 @@ class WinterSummerBot(BotGenerator):
 
             # L'enregistrement des streams ne doit être fait qu'au début du traitement
             # Peux recevoir des messages non demandés
-            # Dois rendre la async_main au plus vite. A vocation à modifier l'état pour laisser l'automate continuer
+            # Dois rendre la bots_engine au plus vite. A vocation à modifier l'état pour laisser l'automate continuer
             market_queue = asyncio.Queue()  # Queue to receive event from market
 
             async def event(msg: Dict[str, Any]) -> None:
@@ -689,7 +689,7 @@ async def bot(client: AsyncClient,
 
     # Lecture éventuelle du context sauvegardé
     json_generator = {}
-    if not global_flags.simulation and path.exists():
+    if not global_flags.simulate and path.exists():
         json_generator, rollback = atomic_load_json(path)
         assert not rollback
         log.info(f"Restart with state={json_generator['state']}")
@@ -706,7 +706,7 @@ async def bot(client: AsyncClient,
         while True:
             if await bot_generator.next() == STOPPED:
                 break
-            if not global_flags.simulation:
+            if not global_flags.simulate:
                 atomic_save_json(bot_generator, path)
     except EndOfDatas:
         log.info("######: Final result of simulation:")

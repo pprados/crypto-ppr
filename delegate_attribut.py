@@ -10,7 +10,7 @@
 # Possible use cases include: making a read-only/immutable "subclass" of the builtin/superspeed dict
 
 # Usage: define a attribute name on your subclass that is used as the proxy/delegator, and pass the methods
-# you want available (or ignored) from the proxy on the async_main class into the decorator. See example below.
+# you want available (or ignored) from the proxy on the bots_engine class into the decorator. See example below.
 # (Your subclass is in charge of ensuring the delegator attribute exists and is a suitable instance of the
 # baseclass, but everything else is automatic)
 
@@ -50,7 +50,7 @@ def custom_inherit(baseclass, delegator='delegate', include=None, exclude=None):
     given baseclass. `delegator` is the name of the attribute on the subclass
     through which delegation is done;  `include` and `exclude` are a whitelist
     and blacklist of attrs to include from baseclass.__dict__, providing the
-    async_main customization hooks.'''
+    bots_engine customization hooks.'''
     # `autoincl` is a boolean describing whether or not to include all of baseclass.__dict__
 
     # turn include and exclude into sets, if they aren't already

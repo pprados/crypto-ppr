@@ -4,6 +4,7 @@ click
 jstyleson
 python-dotenv
 pandas
+fastapi[all]
 
 pytest
 pytest-asyncio

@@ -14,6 +14,7 @@ def to_datetime(binance_datetime: str):
 
 
 class TypingSymbolInfo(dict):
+    """ Un client Binance, enrichie de typage fort, lorsque c'est pertinent."""
     class Filter(ABC):
         def __init__(self, filter: Dict[str, Any]):
             self._filter = filter

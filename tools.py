@@ -14,6 +14,7 @@ from binance.enums import *
 from binance.exceptions import BinanceAPIException
 from binance.helpers import round_step_size
 
+from conf import NO_SAVE
 from shared_time import get_now, ts_to_str
 
 Order_attr = Union[str,float,Decimal,int,bool]
@@ -76,6 +77,8 @@ def json_order(order: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def atomic_save_json(obj: Any, filename: Path) -> None:
+    if NO_SAVE:
+        return
     new_filename = filename.parent / (filename.name + ".new")
     old_filename = filename.parent / (filename.name + ".old")
     with open(new_filename, "w") as f:
@@ -122,15 +125,20 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
         os.sync()
         rollback = True
 
-    with open(filename) as f:
-        return json.load(f,
-                         parse_float=Decimal
-                         ), rollback
-
+    if filename.exists():
+        with open(filename) as f:
+            return json.load(f,
+                             parse_float=Decimal
+                             ), rollback
+    else:
+        return None,False
 
 def generate_order_id(agent_name: str):
     # TODO: aléa alpha sur 20 chars
     return agent_name + "-" + str(randint(100000, 999999))
+
+def generate_bot_id(bot:str):
+    return bot+"-" + str(randint(100000, 999999))
 
 
 async def wait_queue_init(input_queue: Queue) -> None:

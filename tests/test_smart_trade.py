@@ -8,7 +8,7 @@ import pytest
 from binance.enums import ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET, ORDER_TYPE_TAKE_PROFIT_LIMIT, ORDER_TYPE_STOP_LOSS_LIMIT
 
 from events_queues import EventQueues
-from simulate_client import SimulateClient, AbstractSimulateValue, _SimulateUserSocket
+from simulate_client import TestBinanceClient, AbstractSimulateValue, _SimulateUserSocket
 from smart_trade import SmartTrade
 
 api_key = os.environ["BINANCE_API_KEY"]
@@ -32,8 +32,8 @@ async def init_test(conf, values):
         def generate_values(self):
             return (v for v in self.values)
 
-    client = await SimulateClient.create(api_key, api_secret, testnet=test_net,
-                                         values=FixedValues(values))
+    client = await TestBinanceClient.create(api_key, api_secret, testnet=test_net,
+                                            values=FixedValues(values))
     client_account = await client.get_account()
     bot_name = "Test-Smart-Order"
     event_queues = EventQueues(client)

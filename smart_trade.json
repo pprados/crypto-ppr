@@ -1,0 +1,68 @@
+{
+  "bot": "smart_trade",
+  "symbol": "BTCUSDT",
+
+  // pour le volume du trade, on peut indiquer le nb d'unité (unit),
+  // ou un portion de l'ensemble du portefeuille sur la devise (size)
+  // ou un volum total de 'quote' (nb de quote ajusté par le market)
+  //"unit": 1, // unit, size or total or
+  //"size": "10%", // or
+  "total": 20,
+  // Quote qty TODO: en % ?
+
+  // Le mode d'achat peut êre au prix du marché,
+  // a un cours limit à indiquer dans 'price'
+  // après un signal de prix indiqué dans 'price'
+  // et alors un achat à 'order_price'
+  "mode": "MARKET",
+  // "LIMIT", "MARKET", "COND_LIMIT_ORDER", "COND_MARKET_ORDER"
+//  "price": 34100,
+//  "order_price": 1000
+  // If "mode"== "cond_limit_order"
+
+  // Il est possible d'apprendre du cours, pour acheter moin chère
+  // si le cours remonte de 'training_buy'. Mais on suit la chute
+  "training": "0.05%",
+  // Or "-3%" si le prix maximum d'achat est à la limite
+
+  // Il est possible d'indiquer simultanément des règles
+  // de take profit.
+  "take_profit": {
+    // Le signal d'activation est sur une 'base'
+    // au prix du marché ou sur une limite
+    "base": "last",
+    // *bid*, ask, last (securisé via pre-ordre)
+    "mode": "MARKET",
+    // "MARKET" ou "LIMIT"
+    // La cible du profit est dans 'price', en valeur ou %
+    "price": "0.01%",
+    // price or positive %
+    // et il est possible d'apprendre, jusqu'a une baisse de 'trailing'
+    // "auto_activate": True // Calcul de la volatilité voir http://boursegestionportefeuille.e-monsite.com/pages/calcul-de-volatilite-bourse.html
+    "trailing": "-0.05%" // Start à la cible, si positif
+
+    // TODO: tp mini
+    //        "secured": "0.1%", // Si monte a ce niveau
+    //        "timeout": 200 // pendant un délais, ajuste le SL à ce niveau
+  },
+  // Il est possible d'indiquer simultanément des règles de stop loss.
+  "stop_loss": {
+    // Le signal d'activation est sur une 'base'
+    // au prix du marché ou sur une condition limite
+    "base": "last",   // bid, *ask* , last (securisé via pre-ordre)
+    "mode": "MARKET", // "MARKET" ou "COND_LIMIT_ORDER"
+
+    // Le declenchement du prix en valeur ou %
+    "price": "-0.05%",
+    // 32000 or "-3%"
+    // ou a un prix donnés si sur limite
+    //        "order_price": 34300.0, // si "cond_limit"
+    // pour confirmer la baisse, elle etre confirmé
+    // pendant un certain temps (en seconde)
+    "timeout": 2,
+    // et il es possible d'apprendre de la baisse
+    // pour remontrer progressivement le SL
+    // au fur et à mesure de la monté du cours
+    "trailing": true
+  }
+}

@@ -98,7 +98,7 @@ class SimulateFromHistory(AbstractSimulateValue):
     GARDE_PERIOD = 30  # FIXME
 
     def __init__(self, symbol: str):  # TODO: debut et fin de simulation
-        global_flags.simulation = True
+        global_flags.simulate = True
         self.symbol = symbol
         self._interval = "1d"
         self._datas = download_historical_values(symbol, self._interval)
@@ -272,7 +272,7 @@ class SimulateFixedValues(AbstractSimulateValue):
 # Une delegation du client Binance, pour convertir - à la demande - les str en Decimal
 # et les dates en Date.
 # Cette classe va évoluer au fur et à mesure des besoins.
-class SimulateClient(TypingClient):
+class TestBinanceClient(TypingClient):
     """ Simulation d'un client Binance.
     Certaines méthodes sont surchargées pour implémenter des simulations.
     Toutes les autres sont déléguées à un client Binance classique (donc, peut utiliser le réseau)
@@ -324,7 +324,7 @@ class SimulateClient(TypingClient):
             **kw
     ):
         delegate = await AsyncClient.create(api_key, api_secret, testnet=testnet)
-        sclient = SimulateClient(delegate, **kw)
+        sclient = TestBinanceClient(delegate, **kw)
         await sclient.tick()
         return sclient
 
@@ -505,8 +505,8 @@ class SimulateClient(TypingClient):
         # Avance d'une valeur
         self._current_value = next(self._values)  # N'avance qu'ici
         self._max = max(self._max, self._current_value)
-        SimulateClient.log_current += 1
-        if SimulateClient.log_current % 100 == 0:
+        TestBinanceClient.log_current += 1
+        if TestBinanceClient.log_current % 100 == 0:
             str_now = to_str_date(self._simulate_values.now)
             log.info(f"{str_now} current={self._current_value} top={self._max}")
 
