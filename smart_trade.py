@@ -3,7 +3,7 @@
 # J'attend que cela dépasse une resistance, alors je place mon ordre.
 import asyncio
 import logging
-from asyncio import Queue
+from asyncio import Queue, sleep
 from pathlib import Path
 
 import aiohttp
@@ -23,7 +23,7 @@ from shared_time import sleep_speed, get_now
 from simulate_client import EndOfDatas, to_str_date
 from smart_trades_conf import *
 from tools import split_symbol, atomic_load_json, generate_order_id, \
-    update_order, log_wallet, atomic_save_json
+    update_order, log_wallet, atomic_save_json, get_order_price
 
 
 def _benefice(log: logging, wallet: Dict[str, Decimal], initial_wallet: Dict[str, Decimal]) -> None:
@@ -62,6 +62,7 @@ class SmartTrade(BotGenerator):
     STATE_WAIT_TP_OR_SL_ORDER_FILLED_WITH_WEB_SOCKET = "wait_take_profit_or_stop_loss_web_socket"
     STATE_WAIT_TAKE_PROFIT = "wait_take_profit"
 
+    STATE_FINISH = "finish"
     STATE_FINISHED = BotGenerator.FINISHED
     STATE_ERROR = BotGenerator.ERROR
     STATE_CANCELING = "canceling"
@@ -297,18 +298,18 @@ class SmartTrade(BotGenerator):
                 #     pass  # Ignore
 
                 if self.state == SmartTrade.STATE_INIT:
-                    if params.training_buy:
-                        if params.training_buy < 0:
+                    if params.trailing_buy:
+                        if params.trailing_buy < 0:
                             if not params.price:
                                 base_price = (await client.get_symbol_ticker(symbol=params.symbol))["price"]
                             else:
                                 base_price = params.price
-                            self.trailing_buy = -params.training_buy
-                            self.active_buy_condition = base_price * (1 + params.training_buy)
+                            self.trailing_buy = -params.trailing_buy
+                            self.active_buy_condition = base_price * (1 + params.trailing_buy)
                             self.buy_condition = self.active_buy_condition
                             self.activate_trailing_buy = False
                         else:
-                            self.trailing_buy = params.training_buy
+                            self.trailing_buy = params.trailing_buy
                             self.active_buy_condition = params.price
                             if params.mode == MARKET:
                                 price = (await client.get_symbol_ticker(symbol=params.symbol))["price"]
@@ -353,7 +354,7 @@ class SmartTrade(BotGenerator):
                     elif params.total:
                         order["quoteOrderQty"] = params.total
 
-                    if params.training_buy or params.mode == MARKET:
+                    if params.trailing_buy or params.mode == MARKET:
                         order["type"] = ORDER_TYPE_MARKET
                     elif params.mode == LIMIT:
                         order["type"] = ORDER_TYPE_LIMIT
@@ -399,7 +400,7 @@ class SmartTrade(BotGenerator):
                 elif self.state == SmartTrade.STATE_BUY_ORDER_FILLED:
                     if not params.use_take_profit and not params.use_stop_loss:
                         # Rien à faire après l'achat
-                        self.state = SmartTrade.STATE_FINISHED
+                        self.state = SmartTrade.STATE_FINISH
                     else:
                         if params.use_stop_loss:
                             percent = params.stop_loss_percent
@@ -447,14 +448,16 @@ class SmartTrade(BotGenerator):
                                     else:
                                         self.active_take_profit_condition = tp_price * (1 + params.take_profit_trailing)
                                         self.active_take_profit_sell = tp_price
+                                    tp_sell_condition=(self.active_take_profit_sell / self.buy_order.price - 1) * 100
                                     assert self.active_take_profit_sell < self.active_take_profit_condition
+                                    assert tp_sell_condition > 0
                                     log.info(
                                         f"Set take-profit condition at "
                                         f"{self.active_take_profit_condition} (+{percent * 100}%)"
                                         f" ({params.take_profit_base})")
                                     log.info(
                                         f"Set trailing take profit, sell condition at {self.active_take_profit_sell} ("
-                                        f"+{(self.active_take_profit_sell / self.buy_order.price - 1) * 100}%)")
+                                        f"+{tp_sell_condition}%)")
                                 else:
                                     self.active_take_profit_condition = tp_price
                                     log.info(f"Set take profit at {self.active_take_profit_condition} ("
@@ -517,7 +520,7 @@ class SmartTrade(BotGenerator):
                     if self.take_profit_order.is_error():
                         self._set_state_error()
                     elif self.take_profit_order.is_filled():
-                        self.state = SmartTrade.STATE_FINISHED
+                        self.state = SmartTrade.STATE_FINISH
                     yield self
 
 
@@ -576,7 +579,7 @@ class SmartTrade(BotGenerator):
                     if self.stop_loss_order.is_error():
                         self._set_state_error()
                     elif self.stop_loss_order.is_filled():
-                        self.state = SmartTrade.STATE_FINISHED  # TODO: autres erreurs
+                        self.state = SmartTrade.STATE_FINISH  # TODO: autres erreurs
                     yield self
 
 
@@ -647,10 +650,12 @@ class SmartTrade(BotGenerator):
                     yield self
 
                 # ---------------- End
-                elif self.state == SmartTrade.STATE_FINISHED:
+                elif self.state == SmartTrade.STATE_FINISH:
                     log.info("Smart Trade finished")
                     _benefice(log, self.wallet, self.initial_wallet)
                     self._set_terminated()
+                    yield self
+                elif self.state == SmartTrade.STATE_FINISHED:
                     return
                 # ---------------- Cancel and error
                 elif self.state == SmartTrade.STATE_CANCELING:

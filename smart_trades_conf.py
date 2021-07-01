@@ -21,7 +21,7 @@ class SmartTradeParameters:
     price: Decimal
     mode: str  # "limit", "market", "cond_limit_order", "cond_market_order"
     order_price: Optional[Decimal]
-    training_buy: Optional[Decimal]
+    trailing_buy: Optional[Decimal]
 
     use_take_profit: bool
     take_profit_mode: str
@@ -60,8 +60,8 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
     params.order_price = Decimal(str(conf["order_price"])) if "order_price" in conf else None
     assert params.mode not in (COND_LIMIT_ORDER) or params.order_price
     assert params.mode in (MARKET,COND_MARKET_ORDER) or params.price
-    params.training_buy = Decimal(conf['training'].strip('%')) / 100 if 'training' in conf else None
-    assert not params.mode in [COND_LIMIT_ORDER, COND_MARKET_ORDER] or not params.training_buy
+    params.trailing_buy = Decimal(conf['trailing'].strip('%')) / 100 if 'trailing' in conf else None
+    assert not params.mode in [COND_LIMIT_ORDER, COND_MARKET_ORDER] or not params.trailing_buy
     assert not params.total or not params.mode == LIMIT
 
     # TAKE PROFIT
@@ -85,7 +85,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
         # TODO: split target
         params.take_profit_trailing = Decimal(take_profit_conf['trailing'].strip('%')) / 100 if 'trailing' \
                                                                                                 in take_profit_conf else None
-        assert not params.training_buy or params.take_profit_limit_percent or params.take_profit_limit
+        assert not params.trailing_buy or params.take_profit_limit_percent or params.take_profit_limit
 
     # STOP LOST
     params.use_stop_loss = "stop_loss" in conf
@@ -110,5 +110,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
         assert not params.stop_loss_order_price or params.stop_loss_mode == COND_LIMIT_ORDER
         params.stop_loss_timeout = stop_loss_conf.get("timeout", 0) * 1000
         params.stop_loss_trailing = stop_loss_conf.get("trailing")
+        if params.take_profit_trailing < 0 and params.take_profit_limit_percent:
+            assert -params.take_profit_trailing < params.take_profit_limit_percent
     # TODO: leverage
     return params

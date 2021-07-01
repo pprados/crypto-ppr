@@ -10,5 +10,5 @@ SLIPPING_TIME = 1
 STREAM_MSG_TIMEOUT = 0.1 # FIXME
 
 # Debug flag
-NO_SAVE:bool = os.environ.get("NO_SAVE", "false") == "true"
-EMPTY_PENDING:bool = os.environ.get("EMPTY_PENDING", "false") == "true"
+NO_SAVE:bool = os.environ.get("NO_SAVE", "false").lower() == "true"
+EMPTY_PENDING:bool = os.environ.get("EMPTY_PENDING", "false").lower() == "true"

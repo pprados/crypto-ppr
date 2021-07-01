@@ -125,7 +125,8 @@ class AddOrder(BotGenerator):
             self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
         symbol = self.order['symbol']
 
-        # Finite state machine
+        # Finite state
+        yield self  # Une sauvegarde avant de démarrer
         while True:
 
             if self.state == AddOrder.STATE_INIT:
@@ -217,50 +218,59 @@ class AddOrder(BotGenerator):
                     yield self
             elif self.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING:
                 # log.info("Polling get order status...")
-                new_order = await client.get_order(symbol=self.order['symbol'],
-                                               orderId=self.order['orderId'])
-                # See https://binance-docs.github.io/apidocs/spot/en/#public-api-definitions
-                if new_order['status'] == ORDER_STATUS_FILLED:  # or ORDER_STATUS_IOY_FILLED
-                    update_wallet(wallet, new_order)
-                    log_order(log, new_order, prefix+" ****** ")
-                    del self._order
-                    self.order = new_order
-                    self.state = AddOrder.STATE_ORDER_FILLED
-                    yield self
-                elif new_order['status'] == ORDER_STATUS_PARTIALLY_FILLED:  # or ORDER_STATUS_PARTIALLY_FILLED
-                    # FIXME: Partially a traiter
-                    log_order(log,new_order)
-                    update_wallet(wallet, new_order)
-                    log_order(log, new_order, prefix)
-                    if not self.continue_if_partially:
-                        log.warning("PARTIALLY")
+                try:
+                    new_order = await client.get_order(symbol=self.order['symbol'],
+                                                   orderId=self.order['orderId'])
+                    # See https://binance-docs.github.io/apidocs/spot/en/#public-api-definitions
+                    if new_order['status'] == ORDER_STATUS_FILLED:  # or ORDER_STATUS_IOY_FILLED
+                        update_wallet(wallet, new_order)
+                        log_order(log, new_order, prefix+" ****** ")
                         del self._order
                         self.order = new_order
                         self.state = AddOrder.STATE_ORDER_FILLED
+                        yield self
+                    elif new_order['status'] == ORDER_STATUS_PARTIALLY_FILLED:  # or ORDER_STATUS_PARTIALLY_FILLED
+                        # FIXME: Partially a traiter
+                        log_order(log,new_order)
+                        update_wallet(wallet, new_order)
+                        log_order(log, new_order, prefix)
+                        if not self.continue_if_partially:
+                            log.warning("PARTIALLY")
+                            del self._order
+                            self.order = new_order
+                            self.state = AddOrder.STATE_ORDER_FILLED
+                        else:
+                            # FIXME: Partially
+                            pass
+                        yield self
+                    elif new_order['status'] == ORDER_STATUS_REJECTED:
+                        log.error(f'Order {new_order["orderId"]} is rejected')
+                        del self._order
+                        self.order = new_order
+                        self.state = AddOrder.STATE_ERROR
+                        yield self
+                    elif new_order['status'] == ORDER_STATUS_EXPIRED:
+                        log.warning(f'Order {new_order["orderId"]} is expired ({new_order["clientOrderId"]}. Retry')  # FIXME
+                        self.order = self._order
+                        del self._order
+                        self.state = AddOrder.STATE_ORDER_EXPIRED  # Signal the state
+                        yield self
+                        self.state = AddOrder.STATE_ADD_ORDER  # And retry
+                    elif new_order['status'] == ORDER_STATUS_NEW:
+                        self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
+                        yield self
                     else:
-                        # FIXME: Partially
-                        pass
-                    yield self
-                elif new_order['status'] == ORDER_STATUS_REJECTED:
-                    log.error(f'Order {new_order["orderId"]} is rejected')
-                    del self._order
-                    self.order = new_order
-                    self.state = AddOrder.STATE_ERROR
-                    yield self
-                elif new_order['status'] == ORDER_STATUS_EXPIRED:
-                    log.warning(f'Order {new_order["orderId"]} is expired ({new_order["clientOrderId"]}. Retry')  # FIXME
-                    self.order = self._order
-                    del self._order
-                    self.state = AddOrder.STATE_ORDER_EXPIRED  # Signal the state
-                    yield self
-                    self.state = AddOrder.STATE_ADD_ORDER  # And retry
-                elif new_order['status'] == ORDER_STATUS_NEW:
-                    self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET
-                    yield self
-                else:
-                    assert False, f"Unknown status {new_order['status']}"
+                        assert False, f"Unknown status {new_order['status']}"
+                except BinanceAPIException as ex:
+                    if ex.code == -2013 and ex.message.startswith("Order does not exist."):
+                        log.warning("Order does not exist. Retry.")
+                        self.state = AddOrder.STATE_ADD_ORDER
+                        yield self
+                    else:
+                        raise
+
             elif self.state == AddOrder.STATE_ORDER_FILLED:
-                return
+                    return
             elif self.state == AddOrder.STATE_CANCELING:
                 try:
                     await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])

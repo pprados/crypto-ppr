@@ -15,8 +15,8 @@ from tools import Wallet
 
 
 class BotGenerator(dict):
-    FINISHED = "finished"
-    ERROR = "error"
+    FINISHED = "FINISHED"
+    ERROR = "ERROR"
 
     @classmethod
     async def create(cls,
@@ -72,7 +72,7 @@ class BotGenerator(dict):
         self.running=False
 
     def _set_terminated(self):
-        self.state = "FINISHED"
+        self.state = BotGenerator.FINISHED
         self.bot_stop=get_now()
         self.running=False
 

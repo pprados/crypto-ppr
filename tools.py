@@ -135,7 +135,7 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
 
 def generate_order_id(agent_name: str):
     # TODO: aléa alpha sur 20 chars
-    return agent_name + "-" + str(randint(100000, 999999))
+    return agent_name + "-order-" + str(randint(100000, 999999))
 
 def generate_bot_id(bot:str):
     return bot+"-" + str(randint(100000, 999999))
@@ -385,7 +385,7 @@ def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:
     assert wallet[quote] >= 0
 
 def get_order_price(order:Order):
-    if 'price' in order:
-        return Decimal(order['price'])
+    if "cummulativeQuoteQty" in order:
+        return Decimal(order["cummulativeQuoteQty"]) / Decimal(order["origQty"])
     else:
-        return Decimal(order["cummulativeQuoteQty"])/Decimal(order["origQty"])
+        return Decimal(order['price'])
