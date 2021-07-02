@@ -2,28 +2,48 @@
     "winter_summer": {
       "symbol": "BTCUSDT",
 
-      //      "interval": "5m",
-//      "quote_quantity": "1%",
-//      "base_quantity": "0.1%",
-//      "winter": "-0.0001%",
-//      "top": 36000,
+      // Combien remonter dans l'historique pour chercher le top
+      "history_top": "5 years ago UTC",
+
+      // A partir de bougie de quelle taille ? (optionel: 1W par défaut)
+      "interval_top": "1W",
+
+      // oubien, on peut forcer la valeur du top
+      // "top": "4700",
+
+
+      // Quantité de 'quote' a engager (ou de base_quantity mais pas les deux)
+      "quote_quantity": "0.11%",
+
+      // Quantité de 'base' a engager (ou de quote_quantity mais pas les deux)
+      // "base_quantity": "0.1%",  // FIXME: la balance initiale n'est pas prise en compte
+
+      // Période précédante à analyse pour calculer un prix de base pour détecter une forte chute
+      "interval": "1w",
+
+      // Attend une baise de X % par rapport à la moyenne de l'interval précédant
+      "winter": "-20%",
+
+      // Puis attend une remonté au top + X% pour vendre
+      "summer": "5%",
+
+        // Interval
 //      "interval_top": "1M",
 //      "history_top": "5 years ago UTC",
-      // Les deux valeurs suivante permettent de partir d'un top 'proche'
-//      "interval_top": "1w",
-//      "interval_top": "1h",
 
-      // Set pour simulation history
-      "base_quantity": "100%",
-      //"top": "4700", // Force la valeur du top
-      // FIXME "interval_top": "1d",  // Période pour rechercher le top
-      "history_top": "5 week ago",  // Historique pour rechercher le top
-      "interval": "1w",             // Moyenne entre open,high,low,close sur la période précédante
-      "winter": "-20%",             // Attend une baise de X % par rapport à la moyenne de l'interval précédant
-      "summer": "5%",               // Attend le top + X% pour vendre
-//      "history_top": "1 hour ago",
-//      "interval": "2d",  // Moyenne entre open,high,low,close sur la période précédante
-//      "winter": "-0.0001%",
-//      "summer": "0.0001%", // Doit etre positif normalement
+      // Set pour simulation sur history
+//      "base_quantity": "100%",
+//      //"top": "4700", // Force la valeur du top
+//      "history_top": "5 week ago",  // Historique pour rechercher le top
+//      "interval": "1w",             // Moyenne entre open,high,low,close sur la période précédante
+//      "winter": "-20%",             // Attend une baise de X % par rapport à la moyenne de l'interval précédant
+//      "summer": "5%",               // Attend le top + X% pour vendre
+
+      // Set pour TI live
+//       "history_top": "1 hour ago",
+//      "interval_top": "1h", // Recherche proche
+//       "interval": "2d",  // Moyenne entre open,high,low,close sur la période précédante
+//       "winter": "-0.0001%",
+//       "summer": "0.0001%", // Doit etre positif normalement
     }
   }

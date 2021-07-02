@@ -61,11 +61,6 @@ from simulate_client import *
 #     TIMEOUT = 10
 #     NO_MESSAGE_RECONNECT_TIMEOUT = 60
 
-def _benefice(log: logging, symbol: str, wallet: Dict[str, Decimal], base_solde: Decimal, quote_solde: Decimal) -> None:
-    base, quote = split_symbol(symbol)
-    log.info(f"###### Result: {wallet[base] - base_solde} {base} / {wallet[quote] - quote_solde} {quote}")
-
-
 MINIMUM_REDUCE_PRICE = Decimal("0.99")
 
 
@@ -507,7 +502,7 @@ class WinterSummerBot(BotGenerator):
                                 f"****** J'ai perdu en acheter plus chère ({price} {quote}) "
                                 f"que ma dernière vente ({self.last_price} {quote})")
                         self.last_price=self.winter_order.order['price']
-                        _benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
+                        benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
                         del self.winter_order
                         self.state = WinterSummerBot.STATE_WAIT_SUMMER
                         log_wallet(log, self.wallet)
@@ -598,7 +593,7 @@ class WinterSummerBot(BotGenerator):
                     await self.summer_order.next()
                     if self.summer_order.is_filled():
                         self.last_price=self.summer_order.order['price']
-                        _benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
+                        benefice(log, symbol, self.wallet, self.base_quantity, self.quote_quantity)
                         log_wallet(log, self.wallet)
                         del self.summer_order
                         self.state = WinterSummerBot.STATE_WINTER_ORDER
