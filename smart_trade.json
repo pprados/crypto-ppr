@@ -1,68 +1,79 @@
+// Paramètres d'un Smart Trade
 {
+  // Le nom du bot à utiliser
   "bot": "smart_trade",
+
+  // La pair à utiliser (par défaut, achete la base avec la quote - achette du BTC avec de l'USDT)
   "symbol": "BTCUSDT",
 
-  // pour le volume du trade, on peut indiquer le nb d'unité (unit),
+  // Pour le volume du trade, on peut indiquer le nb d'unité (unit),
   // ou un portion de l'ensemble du portefeuille sur la devise (size)
-  // ou un volum total de 'quote' (nb de quote ajusté par le market)
-  //"unit": 1, // unit, size or total or
-  //"size": "10%", // or
-  "total": 20,
-  // Quote qty TODO: en % ?
+  // ou un volum total de 'quote' (nb d'unité ajusté par le market)
+  //"unit": 1,      // nombre d'uniter à acheter
+  //"size": "10%",  // taille par rapport à l'ensemble des quotes du portefeuille global
+  "total": 20,      // Nombre de quote à utiliser (unité ajusté automatiquement)
 
   // Le mode d'achat peut êre au prix du marché,
   // a un cours limit à indiquer dans 'price'
-  // après un signal de prix indiqué dans 'price'
-  // et alors un achat à 'order_price'
-  "mode": "MARKET",
-  // "LIMIT", "MARKET", "COND_LIMIT_ORDER", "COND_MARKET_ORDER"
-//  "price": 34100,
-//  "order_price": 1000
-  // If "mode"== "cond_limit_order"
+  // ou après un signal de prix indiqué dans 'price', alors un achat est demandé à "order_price"
+  "mode": "MARKET",       // "LIMIT", "MARKET", "COND_LIMIT_ORDER", "COND_MARKET_ORDER"
+  // "price": 34100,       // si mode != "MARKET"
+  // "order_price": 1000   // Si mode=="COND_LIMIT_ORDER"
 
   // Il est possible d'apprendre du cours, pour acheter moin chère
   // si le cours remonte de 'training_buy'. Mais on suit la chute
-  "training": "0.05%",
-  // Or "-3%" si le prix maximum d'achat est à la limite
+  "training": "0.05%", // "+3%" TODO ou "-3%" si le prix maximum d'achat est à la limite
 
-  // Il est possible d'indiquer simultanément des règles
-  // de take profit.
+  // Il est possible d'indiquer simultanément des règles de take profit (TP).
   "take_profit": {
-    // Le signal d'activation est sur une 'base'
-    // au prix du marché ou sur une limite
-    "base": "last",
-    // *bid*, ask, last (securisé via pre-ordre)
-    "mode": "MARKET",
-    // "MARKET" ou "LIMIT"
-    // La cible du profit est dans 'price', en valeur ou %
-    "price": "0.01%",
-    // price or positive %
-    // et il est possible d'apprendre, jusqu'a une baisse de 'trailing'
-    // "auto_activate": True // Calcul de la volatilité voir http://boursegestionportefeuille.e-monsite.com/pages/calcul-de-volatilite-bourse.html
-    "trailing": "-0.05%" // Start à la cible, si positif
+    // Le signal d'activation est sur une 'base' au prix du marché ou sur une limite
+    "base": "last",     // La base de déclanchement : *bid*, ask, last (securisé via pre-ordre)
+    "mode": "MARKET",   // "MARKET" ou "LIMIT"
 
-    // TODO: tp mini
-    //        "secured": "0.1%", // Si monte a ce niveau
-    //        "timeout": 200 // pendant un délais, ajuste le SL à ce niveau
+    // La cible du profit en valeur ou % (TODO: negatif ?)
+    // 100.0: déclenche à 100.0 quote
+    // "+3%": déclenche au prix d'achat+3% (doit etre positif)
+    "price": "0.01%",
+
+    // "+3%": déclenche à la cible+3%, et vend si descend sous la cible (ne peut inf. à la cible hors market)
+    // "-3%": déclenche à la cible, et vend si descend à la cible-3%
+    "trailing": "-0.05%"
+
   },
+
   // Il est possible d'indiquer simultanément des règles de stop loss.
   "stop_loss": {
-    // Le signal d'activation est sur une 'base'
-    // au prix du marché ou sur une condition limite
+    // Le signal d'activation est sur une 'base' (ask préconisé)
     "base": "last",   // bid, *ask* , last (securisé via pre-ordre)
-    "mode": "MARKET", // "MARKET" ou "COND_LIMIT_ORDER"
+
+    // "MARKET": vend au marché
+    // "COND_LIMIT_ORDER" : attend une condition pour vendre à la limite
+    "mode": "MARKET",
 
     // Le declenchement du prix en valeur ou %
+    // 100.0: vend à 100.0
+    // "-3%" : Vend sous le prix d'achat-3% (doit être négatif)
+    // Si mode == "COND_LIMIT_ORDER", utilse "price" comme signal de dépot d'ordre
     "price": "-0.05%",
-    // 32000 or "-3%"
-    // ou a un prix donnés si sur limite
-    //        "order_price": 34300.0, // si "cond_limit"
-    // pour confirmer la baisse, elle etre confirmé
-    // pendant un certain temps (en seconde)
+
+    // Si mode == "COND_LIMIT_ORDER", prix à ajouter au carnet d'ordre
+    // "order_price": 100.0,
+
+    // Le signal d'une baisse peut etre confirmé pendant un certain délai en seconde.
+    // Le signal ne doit pas remonter pendant ce temps
     "timeout": 2,
-    // et il es possible d'apprendre de la baisse
-    // pour remontrer progressivement le SL
-    // au fur et à mesure de la monté du cours
+
+    // Il es possible d'apprendre de la baisse pour remontrer progressivement le SL
+    // au fur et à mesure de la monté du cours.
+    // Le rapport achat/stop lost reste constant.
     "trailing": true
   }
 }
+
+// TODO:
+// - Ajouter les Take profits multiple
+// - Gérer les "COND_LIMIT_ORDER", "COND_MARKET_ORDER"
+// - Ajouter un tp_limit avec timeout pour sécurer les gains à parti d'un niveau de TP
+// - Ajouter un calcul de la volatilité, pour activer ou non, automatiquement le trailing TP ou SL
+// - Ajouter les ordres "inverse", pour inverser les devices. Vendre avant d'acheter.
+//   C'est util pour la vente à découvert, ou pour traider BTC/ETH par exemple.

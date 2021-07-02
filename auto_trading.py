@@ -5,7 +5,6 @@ import tracemalloc
 from asyncio import get_event_loop, sleep
 from decimal import getcontext, FloatOperation
 from typing import Dict, Any, Optional
-import global_flags
 
 import click as click
 import uvicorn
@@ -13,26 +12,26 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from starlette import status
 
+import global_flags
+from api_key import api_key, api_secret, test_net
 from engine import Engine
-
-api_key = os.environ["BINANCE_API_KEY"]
-api_secret = os.environ["BINANCE_API_SECRET"]
-test_net = os.environ.get("BINANCE_API_TEST", "false").lower() == "true"
-
-app = FastAPI()
-
-engine: Optional[Engine] = None
+from request_json_comments import JsonCommentRoute
 
 
-@app.on_event('startup')
-async def startup_event():
+async def startup():
     loop = get_event_loop()
 
     # Creation de l'engine pour les bots. A garder dans une variable globale
     # pour que les threads associés restent en vie.
     global engine
     engine = Engine(api_key, api_secret, test_net, global_flags.simulate)
-    await sleep(2)  # Wait the startup
+    await sleep(1)  # Wait the startup
+
+
+app = FastAPI(on_startup=[startup])
+app.router.route_class = JsonCommentRoute
+
+engine: Optional[Engine] = None
 
 
 @app.post("/bots/", status_code=status.HTTP_201_CREATED)

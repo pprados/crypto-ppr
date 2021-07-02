@@ -194,3 +194,6 @@ Cela peut être valorisé dans un fichier `.env`
 
 # Notes
 Type d'ordres https://www.binance.com/en/support/articles/360033779452
+
+
+- Calcul de la volatilité voir http://boursegestionportefeuille.e-monsite.com/pages/calcul-de-volatilite-bourse.html
