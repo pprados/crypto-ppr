@@ -5,7 +5,7 @@ import os
 NO_SAVE:bool = os.environ.get("NO_SAVE", "false").lower() == "true"
 EMPTY_PENDING:bool = os.environ.get("EMPTY_PENDING", "false").lower() == "true"
 # Active une production d'exception aléatoire, obligeant à reprendre depuis le début
-CHECK_RESILIENCE: bool = os.environ.get("CHECK_RESILIENCE", "false").lower() == "true"
+CHECK_RESILIENCE: int = int(os.environ.get("CHECK_RESILIENCE", "0"))
 
 MIN_RECONNECT_WAIT = 10 if not CHECK_RESILIENCE else 1
 

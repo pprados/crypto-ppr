@@ -87,7 +87,7 @@ class FullBot(BotGenerator):
             # ---- Initialisation du bot
 
             # Récupération des paramètres
-            params = {}
+            params = conf
 
             # ----------------- Reprise du context des sous-generateor après un crash ou un reboot
             if not self:
@@ -102,12 +102,15 @@ class FullBot(BotGenerator):
             else:
                 # Reset les sous generateur
                 if 'smart_trade' in self and self.smart_trade:
-                    self.smart_trade = await SmartTrade.reset(client,
-                                                              event_queues,
-                                                              queue,
-                                                              log,
-                                                              wallet=self.wallet,
-                                                              )
+                    self.smart_trade = await SmartTrade.create(
+                        client,
+                        event_queues,
+                        queue,
+                        log,
+                        generator_name="testing",
+                        client_account=client_account,
+                        conf=params['st_conf']
+                    )
 
 
             # Finite state machine
@@ -126,28 +129,7 @@ class FullBot(BotGenerator):
                     self.state = FullBot.STATE_ADD_ST
 
                 elif self.state == FullBot.STATE_ADD_ST:
-                    st_conf = {
-                        "bot": "smart_trade",
-                        "comment": "Essaie de l'API",
-                        "symbol": "BTCUSDT",
-                        "total": 20,
-                        "mode": "MARKET",
 
-                        "take_profit": {
-                            "base": "last",
-                            "mode": "MARKET",
-                            "price": "0.07%",
-                            "trailing": "-0.06%",
-                        },
-                        "Xstop_loss": {
-                            "base": "last",
-                            "mode": "MARKET",
-                            "price": "-0.05%",
-                            "trailing": True,
-                            "timeout": 2,
-
-                        }
-                    }
                     self.smart_trade = await SmartTrade.create(
                         client,
                         event_queues,
@@ -155,7 +137,7 @@ class FullBot(BotGenerator):
                         log,
                         generator_name="testing",
                         client_account=client_account,
-                        conf=st_conf,
+                        conf=params['st_conf'],
                     )
                     self.state = FullBot.STATE_WAIT_ST
                     yield self
@@ -204,7 +186,8 @@ class FullBot(BotGenerator):
         except (ClientConnectorError, asyncio.TimeoutError, aiohttp.ClientOSError) as ex:
             self._set_state_error()
             # Attention, pas de sauvegarde.
-            raise
+            log.exception(ex)
+            raise ex
 
 
 # Bot qui utilise le generateur correspondant
@@ -213,7 +196,7 @@ async def bot(client: TypingClient,
               client_account: Dict[str, Any],
               bot_name: str,
               event_queues: EventQueues,
-              conf: Dict[str, str]):
+              conf: Dict[str, Any]):
     path = Path("ctx", bot_name + ".json")
 
     log = logging.getLogger(bot_name)
@@ -237,7 +220,7 @@ async def bot(client: TypingClient,
                                          conf=conf,
                                          )
     try:
-        previous = bot_generator.copy()
+        previous = None
         while True:
             rc = await anext(bot_generator)
             if not global_flags.simulate:

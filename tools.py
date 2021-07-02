@@ -6,7 +6,7 @@ from decimal import Decimal
 from json import JSONDecodeError
 from pathlib import Path
 from random import randint
-from typing import Any, Tuple, Dict, Union, Optional
+from typing import Any, Tuple, Dict, Union, Optional, Callable
 
 import jstyleson as json
 from binance import AsyncClient
@@ -23,6 +23,11 @@ Wallet = Dict[str,Decimal]
 
 async def anext(ait):
     return await ait.__anext__()
+
+def benefice(log: logging, symbol: str, wallet: Dict[str, Decimal], base_solde: Decimal, quote_solde: Decimal) -> None:
+    base, quote = split_symbol(symbol)
+    log.warning(f"###### Result: {wallet[base] - base_solde} {base} / {wallet[quote] - quote_solde} {quote}")
+
 
 def _parse_order(order: Dict[str, Any]) -> Tuple[str, str, Decimal, Decimal]:
     base, quote = split_symbol(order['symbol'])
@@ -76,16 +81,6 @@ def generate_bot_id(bot:str):
     return bot+"-" + str(randint(100000, 999999))
 
 
-async def wait_queue_init(input_queue: Queue) -> None:
-    """ Attent l'initiatilisation des queues user et multiplexe """
-    user_queue_initilized = False
-    multiplex_queue_initilized = False
-    while not user_queue_initilized or not multiplex_queue_initilized:
-        msg = await input_queue.get()
-        if msg["from"] == "stream_user" and msg["e"] == "stream_initialized":
-            user_queue_initilized = True
-        if msg["from"] == "stream_multiplex" and msg["e"] == "stream_initialized":
-            multiplex_queue_initilized = True
 
 def str_d(d:Decimal) -> str:
     s=f"{d:.20f}"
@@ -240,6 +235,16 @@ def split_symbol(symbol: str) -> Tuple[str, str]:
     m = re.match(r'(\w+)((USDT)|(ETH)|(BTC)|(USDC)|(BUSD)|(BNB))$', symbol)
     return m.group(1), m.group(2)
 
+
+def wallet_from_symbol(client_account, symbol):
+    base, quote = split_symbol(symbol)
+    balance_base = next(filter(lambda x: x['asset'] == base, client_account['balances']))
+    balance_quote = next(filter(lambda x: x['asset'] == quote, client_account['balances']))
+    wallet={}
+    wallet[base] = balance_base["free"]
+    wallet[quote] = balance_quote["free"]
+    return wallet
+
 async def to_usdt(client:AsyncClient,log:logging, asset:str,val:Decimal) -> Decimal:
     try:
         if not val:
@@ -261,7 +266,8 @@ async def to_usdt(client:AsyncClient,log:logging, asset:str,val:Decimal) -> Deci
         raise
 
 
-def _dump_order(log: logging, order: Dict[str, Any], prefix: str, suffix: str = ''):
+def _dump_order(log:Callable,
+                order: Dict[str, Any], prefix: str, suffix: str = ''):
     side, token, other, quantity, quote_order_qty, price = _parse_order(order)
     pre_suffix = ''
     if order['type'] in (ORDER_TYPE_STOP_LOSS_LIMIT, ORDER_TYPE_STOP_LOSS):
@@ -270,27 +276,26 @@ def _dump_order(log: logging, order: Dict[str, Any], prefix: str, suffix: str = 
         pre_suffix = " for take profit"
     str_price = "MARKET" if order['type'] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER) else str_d(price)
     if quantity and str_price!="MARKET":
-        log.info(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at {str_price} {other}{pre_suffix}{suffix}")
+        log(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at {str_price} {other}{pre_suffix}{suffix}")
     elif str_price == "MARKET":
         if 'cummulativeQuoteQty' in order:
             calculate_price = Decimal(order['cummulativeQuoteQty'])/Decimal(order['executedQty'])
-            log.info(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at {calculate_price} {other} {pre_suffix}{suffix}")
+            log(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at {calculate_price} {other} {pre_suffix}{suffix}")
         else:
             if 'quoteOrderQty' in order:
-                log.info(
-                    f"{ts_to_str(get_now())}: {prefix}{side} {token} for {order['quoteOrderQty']} {other} at MARKET {pre_suffix}{suffix}")
+                log(f"{ts_to_str(get_now())}: {prefix}{side} {token} for {order['quoteOrderQty']} {other} at MARKET {pre_suffix}{suffix}")
             else:
-                log.info(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at MARKET {pre_suffix}{suffix}")
+                log(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at MARKET {pre_suffix}{suffix}")
     elif quote_order_qty:
-        log.info(f"{prefix}{side} {token} for {str_d(quote_order_qty)} {other} at MARKET {pre_suffix}{suffix}")
+        log(f"{prefix}{side} {token} for {str_d(quote_order_qty)} {other} at MARKET {pre_suffix}{suffix}")
 
 
 def log_add_order(log: logging, order: Dict[str, Any],prefix=None):
-    _dump_order(log, order, f"Try to " if not prefix else prefix, "...")
+    _dump_order(log.info, order, f"Try to " if not prefix else prefix, "...")
 
 
 def log_order(log: logging, order: Dict[str, Any],prefix="****** "):
-    _dump_order(log, order, prefix)
+    _dump_order(log.warn, order, prefix)
 
 def log_wallet(log: logging, wallet: Wallet) -> None:
     log.info("wallet:" + " ".join([f"{k}={v}" for k, v in wallet.items()]))

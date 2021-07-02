@@ -24,13 +24,7 @@ from shared_time import sleep_speed, get_now
 from simulate_client import EndOfDatas, to_str_date
 from smart_trades_conf import *
 from tools import split_symbol, generate_order_id, \
-    update_order, log_wallet, anext
-
-
-def _benefice(log: logging, wallet: Dict[str, Decimal], initial_wallet: Dict[str, Decimal]) -> None:
-    diff = {k: float(v - initial_wallet[k]) for k, v in wallet.items()}
-    # log.info(f"###### Result: {wallet[base] - base_solde} {base} / {wallet[quote] - quote_solde} {quote}")
-    log.info(f"###### Result: {diff}")
+    update_order, log_wallet, anext, wallet_from_symbol, benefice
 
 
 # Utilisation d'un generateur pour pouvoir utiliser la stratégie
@@ -225,10 +219,7 @@ class SmartTrade(BotGenerator):
 
             # Récupération des balances du wallet master
             base, quote = split_symbol(params.symbol)
-            balance_base = next(filter(lambda x: x['asset'] == base, client_account['balances']))
-            balance_quote = next(filter(lambda x: x['asset'] == quote, client_account['balances']))
-            self.wallet[base] = balance_base["free"]
-            self.wallet[quote] = balance_quote["free"]
+            self.wallet = wallet_from_symbol(client_account,params.symbol)
             self.initial_wallet = self.wallet.copy()
 
             # ----------------- Reprise du context des sous-generateor après un crash ou un reboot
@@ -238,7 +229,7 @@ class SmartTrade(BotGenerator):
             else:
                 # Reset les sous generateur
                 if 'buy_order' in self and self.buy_order:
-                    self.buy_order = await AddOrder.reset(client,
+                    self.buy_order = await AddOrder.create(client,
                                                           event_queues,
                                                           queue,
                                                           log,
@@ -247,7 +238,7 @@ class SmartTrade(BotGenerator):
                                                           )
 
                 if 'take_profit_order' in self and self.take_profit_order:
-                    self.take_profit_order = await AddOrder.reset(client,
+                    self.take_profit_order = await AddOrder.create(client,
                                                                   event_queues,
                                                                   queue,
                                                                   log,
@@ -256,7 +247,7 @@ class SmartTrade(BotGenerator):
                                                                   )
 
                 if 'stop_loss_order' in self and self.stop_loss_order:
-                    self.stop_loss_order = await AddOrder.reset(client,
+                    self.stop_loss_order = await AddOrder.create(client,
                                                                 event_queues,
                                                                 queue,
                                                                 log,
@@ -631,7 +622,7 @@ class SmartTrade(BotGenerator):
                 # ---------------- End
                 elif self.state == SmartTrade.STATE_FINISH:
                     log.info("Smart Trade finished")
-                    _benefice(log, self.wallet, self.initial_wallet)
+                    benefice(log, self.wallet, self.initial_wallet)
                     self._set_terminated()
                     yield self
                 elif self.state == SmartTrade.STATE_FINISHED:
@@ -691,13 +682,14 @@ class SmartTrade(BotGenerator):
             raise
 
 
+
 # Bot qui utilise le generateur correspondant
 # et se charge de sauver le context.
 async def bot(client: TypingClient,
               client_account: Dict[str, Any],
               bot_name: str,
               event_queues: EventQueues,
-              conf: Dict[str, str]):
+              conf: Dict[str, Any]):
     path = Path("ctx", bot_name + ".json")
 
     log = logging.getLogger(bot_name)
@@ -717,10 +709,9 @@ async def bot(client: TypingClient,
                                             state_for_generator,
                                             generator_name=bot_name,
                                             client_account=client_account,
-                                            conf=conf,
                                             )
     try:
-        previous = bot_generator.copy()
+        previous = None
         while True:
             rc = anext(await bot_generator)
             if not global_flags.simulate:

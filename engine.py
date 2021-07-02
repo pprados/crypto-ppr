@@ -1,0 +1,274 @@
+import logging
+import random
+from asyncio import sleep, wait, FIRST_COMPLETED, TimeoutError, get_event_loop, Task
+from dataclasses import dataclass
+from decimal import Decimal
+from enum import Enum
+from importlib import import_module
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Set
+
+from aiohttp import ClientConnectorError
+from binance.exceptions import BinanceAPIException
+
+import global_flags
+from TypingClient import TypingClient
+from atomic_json import atomic_load_json, atomic_save_json
+from conf import MIN_RECONNECT_WAIT, SLIPPING_TIME, CHECK_RESILIENCE
+from events_queues import EventQueues
+from simulate_client import SimulateFixedValues
+from tools import generate_bot_id
+
+
+class EngineMsg(Enum):
+    CREATE_BOT = "create_bot"
+    DEL_BOT = "del_bot"
+    GET_BOT = "get_bot"
+
+
+@dataclass(init=False)
+class Engine:
+    api_key: str
+    api_secret: str
+    test_net: bool
+    bots: List[Task]
+
+    def __init__(self,
+                 api_key: str,
+                 api_secret: str,
+                 test_net: bool,
+                 simulate: bool,
+                 ):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.test_net = test_net
+        self.simulate = simulate
+
+        self.engine_conf = []
+        self.dict_engine_conf = {}
+
+        self.log = logging.getLogger(__name__)
+        self.path_conf = Path("ctx/engine.json")
+
+        self.engine_conf, rollback = atomic_load_json(self.path_conf)
+        if rollback:
+            logging.warning("Use the rollback version of conf.json")
+        if not self.engine_conf:
+            self.engine_conf = []  # Bot dans l'ordre inverse d'insertion
+        loop = get_event_loop()
+        self._engine_thread = loop.create_task(self.run())  # Démarre le thread pour le moteur
+
+    def __del(self):
+        self._engine_thread.cancel()
+
+    async def _wait_started(self):
+        while 'client' not in self.__dict__:
+            await sleep(1)  # FIXME: limit de boucle
+
+    async def _init_client(self):
+        """
+        Construction d'un client
+        ou d'une simulation de client Binance
+        """
+        # initialise the client
+        # {"verify": False, "timeout": 20}
+        # client = await AsyncClient.create(api_key, api_secret, testnet=test_net)
+        client = await TypingClient.create(
+            self.api_key,
+            self.api_secret, testnet=self.test_net,
+        )
+        if self.simulate:
+            # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+            # client = await SimulateRandomValues("BTCUSDT",min=33000,max=35000,step=10)
+            client = SimulateFixedValues(
+                client,
+                "BTCUSDT",
+                [
+                    Decimal(36000),
+                    Decimal(35000),
+                    Decimal(34900),
+                    Decimal(34800),
+                ])
+
+        # client = Client(api_key, api_secret, testnet=test_net)
+
+        return client
+
+    # async def create_bot(self,id:str,conf:Dict[str,Any]):
+    #     self.request_queue.put_nowait(
+    #         {
+    #             "m": EngineMsg.CREATE_BOT,
+    #             "id": id,
+    #             "conf": conf
+    #         })
+    #     result = await self.response_queue.get()
+    #     if 'e' in result:
+    #         raise HTTPException(status_code=result["e"], detail=result["detail"])
+    #     return result
+    #
+
+    async def recreate_bot(self,
+                           id: Optional[str],
+                           conf: Dict[str, Any]
+                           ) -> None:
+        loop = get_event_loop()
+        fn_name = conf["bot"]
+        if not id:
+            id = generate_bot_id(fn_name)
+        if '.' not in fn_name:
+            fn_name += ".bot"
+        module_path, fn = fn_name.rsplit(".", 1)
+        async_fun = getattr(import_module(module_path), fn)
+        self.event_queues.add_queue(id)
+        self.bots.add(loop.create_task(async_fun(self.client,
+                                                 self.client_account,
+                                                 id,
+                                                 self.event_queues,
+                                                 conf)))
+
+    async def create_bot(
+            self,
+            id: Optional[str],
+            conf: Dict[str, Any],
+    ) -> str:
+        """
+        Creation d'un bot avec un id
+        :param id:
+        :param conf:
+        :return:
+        """
+        if not id:
+            id = generate_bot_id(conf['bot'])
+        if id in self.dict_engine_conf:
+            raise ValueError(f"Error:Bot {id} exist")
+        await self._wait_started()
+
+        await self.recreate_bot(id, conf)
+        self.engine_conf.insert(0, {id: conf})
+        self.dict_engine_conf[id] = self.engine_conf[0]
+        atomic_save_json(self.engine_conf, self.path_conf,
+                         comment="Dans l'ordre, plus récent en premier")
+        return id
+
+    async def delete_bot(self, id: str):
+        if id not in self.dict_engine_conf:
+            raise ValueError(f"Error:Bot {id} not found")
+        self.engine_conf.remove(self.dict_engine_conf[id])
+        # Informe le bot
+        self.event_queues[id].put_nowait(  # FIXME: le bot doit le capture
+            {
+                "stream": "@bot",
+                "e": "kill"
+            }
+        )
+        Path("ctx", id + "json").unlink(missing_ok=True)
+        atomic_save_json(self.engine_conf, self.path_conf)
+
+    @staticmethod
+    def _resume(id: str, bot_conf: Dict[str, Any]):
+        bot = bot_conf[next(iter(bot_conf))]
+        state = atomic_load_json(Path("ctx", id + ".json"))[0]
+        return {"id": id,
+                "bot": bot['bot'],
+                "state": state['state'],
+                "bot_start": int(state['bot_start']),
+                "bot_stop": int(state['bot_stop'])
+                }
+
+    async def list_bot_id(self):
+        return [Engine._resume(k, self.dict_engine_conf[k]) for k in self.dict_engine_conf.keys()]
+
+    async def get_bot(self, id: str):
+        if id not in self.dict_engine_conf:
+            raise ValueError(f"Error:Bot {id} not found")
+        return \
+            {
+                "id": id,
+                "conf": self.dict_engine_conf[id],
+                "state": atomic_load_json(Path("ctx", id + ".json"))[0]
+            }
+
+    async def run(self):
+        loop = get_event_loop()
+        log = self.log
+        log.info("Start auto_trading")
+        unfinished = []
+
+        while True:
+            self.bots: Set[Task] = set()
+            try:
+
+                client = await self._init_client()  # Reset client
+
+                # Création des agents à partir de conf.json.
+
+                # Les infos du comptes, pour savoir ce qui est gardé par les agents
+                self.client_account: Dict[str, Any] = await client.get_account()
+                # Agent la balance par defaut pour les agents. FIXME: Glups, s'il y a des ordres en cours...
+                for balance in self.client_account['balances']:
+                    balance['agent_free'] = balance['free']
+
+                # Regroupement de tous les évenments binance dans une queue unique, broadcasté vers les queues des bots
+                self.event_queues = EventQueues(client)
+                # FXIME: rendre la liste dynamique
+                self.event_queues.add_streams(
+                    [
+                        # "btcusdt@aggTrade",
+                        "btcusdt@trade",
+                        "btcusdt@bookTicker"
+                    ])
+                self.client = client  # Commit the initialization
+
+                # Re-création des bots en cours d'après la conf
+                self.dict_engine_conf = {}  # Bot par clé pour un accès direct
+                for bot_conf in self.engine_conf:
+                    id = next(iter(bot_conf))
+                    conf = bot_conf[id]
+                    self.dict_engine_conf[id] = bot_conf
+                    log.info(f"Restart bot {id}")
+                    await self.recreate_bot(id, conf)
+
+                # Boucle d'avancement des bots, et de gestion des messages de l'API
+                while True:
+                    if self.bots:
+                        finished, unfinished = await wait(self.bots,
+                                                          loop=loop,
+                                                          timeout=SLIPPING_TIME,
+                                                          # Ajout éventuellement de nouveaux bots
+                                                          return_when=FIRST_COMPLETED)
+                        if CHECK_RESILIENCE and random.randint(0, 100) < CHECK_RESILIENCE:
+                            log.warning("FAKE Timeout")
+                            raise TimeoutError("Fake timeout")
+                        for task in finished:
+                            task.result()  # Raise exception if error
+                        assert unfinished is not None
+                        self.bots = unfinished
+                    else:
+                        await sleep(SLIPPING_TIME)  # Return to event loop
+                    # if not unfinished:
+                    #     # No more coroutine
+                    #     return
+
+            except (BinanceAPIException, ClientConnectorError, TimeoutError) as ex:
+                # FIXME: Bug en cas de perte totale du réseau, sur la résolution DNS
+                # Wait and retry
+                ex_msg = str(ex)
+                if not ex_msg or ex_msg == 'None':
+                    ex_msg = ex.__class__.__name__
+                log.error(f"Binance communication error ({ex_msg})")
+                # Informe tous les bots
+                self.event_queues.broadcast_msg(
+                    {
+                        "stream": "@bot",
+                        "e": "kill"
+                    })
+                log.info(f"Sleep {MIN_RECONNECT_WAIT}s before restart...")
+                await sleep(MIN_RECONNECT_WAIT)
+                for task in unfinished:
+                    task.cancel()
+                log.info("Try to restart")
+            except Exception as ex:
+                log.exception(ex)
+                raise
+            if global_flags.simulate:
+                break

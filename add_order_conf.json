@@ -1,0 +1,11 @@
+// Bot permettant de passer des ordres "résiliant"
+{
+  "bot": "add_order",
+  "comment": "Injection sans fin de ST",
+  "order": {
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "MARKET",
+    "quoteOrderQty": 20
+  }
+}

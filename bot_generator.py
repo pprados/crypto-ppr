@@ -26,7 +26,7 @@ class BotGenerator(dict):
                      queue:Queue,
                      log: logging,
                      init: Dict[str, Any]={},
-                     **kwargs:Dict[str,Any]) -> 'AddOrder':
+                     **kwargs:Dict[str,Any]) -> 'BotGenerator':
         """
         Il n'est pas possible d'avoir un constructeur asynchrone,
         Donc on passe par une méthode 'create()'
@@ -60,25 +60,6 @@ class BotGenerator(dict):
         #await self.next()
         await anext(self)
         return self
-
-    @classmethod
-    async def reset(cls,
-                     client: AsyncClient,
-                     event_queues: EventQueues,
-                     queue:Queue,
-                     log: logging,
-                     init: Dict[str, Any],
-                    wallet:Wallet
-                    ) -> 'AddOrder':
-        init.pop("_generator", None)
-        bot_generator = await cls()._start(client,
-                                           event_queues,
-                                           queue,
-                                           log,
-                                           init,
-                                           wallet=wallet)
-        assert '_generator' in bot_generator.__dict__
-        return bot_generator
 
     @abstractmethod
     async def generator(self,

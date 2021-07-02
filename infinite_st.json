@@ -2,5 +2,24 @@
 {
   "bot": "infinite_st",
   "comment": "Injection sans fin de ST",
-  "symbol": "BTCUSDT"
+  "st_conf": {
+    "bot": "smart_trade",
+    "comment": "Essaie de l'API",
+    "symbol": "BTCUSDT",
+    "total": 20,
+    "mode": "MARKET",
+    "take_profit": {
+      "base": "last",
+      "mode": "MARKET",
+      "price": "0.02%",
+      "trailing": "-0.01%"
+    },
+    "Xstop_loss": {
+      "base": "last",
+      "mode": "MARKET",
+      "price": "-0.02%",
+      "trailing": true,
+      "timeout": 2
+    }
+  }
 }
