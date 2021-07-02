@@ -57,22 +57,6 @@ class AddOrder(BotGenerator):
         else:
             return Decimal(self.order['quantity'])
 
-    async def _start(self,
-                     client: AsyncClient,
-                     event_queues:EventQueues,
-                     user_queue: Queue,
-                     log: logging,
-                     init: Dict[str, str],
-                     **kwargs) -> 'AddOrder':
-        self._generator = self.generator(client,
-                                         event_queues,
-                                         user_queue,
-                                         log,
-                                         init,
-                                         **kwargs)
-        await self.next()
-        return self
-
     def is_filled(self,accept_partial=False):
         return self.state == AddOrder.STATE_ORDER_FILLED or accept_partial \
                and self.state == AddOrder.STATE_ORDER_PARTIALLY_FILLED
@@ -80,9 +64,6 @@ class AddOrder(BotGenerator):
     # FIXME
     # def is_partially_filled(self):
     #     return self.state == AddOrder.STATE_ORDER_FILLED
-
-    def is_error(self):
-        return self.state == AddOrder.STATE_ERROR
 
     def is_waiting(self):
         return self.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING

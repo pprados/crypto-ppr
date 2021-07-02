@@ -1,0 +1,6 @@
+// Bot de test, injectant à l'infini des Smart Trades
+{
+  "bot": "infinite_st",
+  "comment": "Injection sans fin de ST",
+  "symbol": "BTCUSDT"
+}

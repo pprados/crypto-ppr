@@ -90,33 +90,16 @@ class WinterSummerBot(BotGenerator):
 
     STATE_ERROR = "error"
 
-    async def _start(self,
-                     client: TypingClient,
-                     agent_queue: Queue,
-                     log: logging,
-                     init: Dict[str, str],
-                     **kwargs) -> 'WinterSummerBot':
-        self._generator = self.generator(client,
-                                         agent_queue,
-                                         log,
-                                         init,
-                                         **kwargs)
-        # TODO Réactive les générateurs pour les ordres ?
-        # if 'winter_order' in init:
-        #     init['winter_order'] = await AddOrder.create(client,user_queue,log,init['winter_order'])
-        # if 'summer_order' in init:
-        #     init['summer_order'] = await AddOrder.create(client,user_queue,log,init['summer_order'])
-        await self.next()
-        return self
-
     async def generator(self,
                         client: AsyncClient,
-                        bot_queue: Queue,
+                        event_queues: EventQueues,
+                        queue: Queue,
                         log: logging,
                         init: Dict[str, str],  # Initial context
                         client_account: Dict[str, Any],
                         generator_name: str,
-                        conf: Dict[str, str]) -> None:
+                        conf: Dict[str, Any],
+                        **kwargs) -> None:
         try:
             if not init:
                 # Premier départ

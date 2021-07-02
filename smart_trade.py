@@ -16,14 +16,15 @@ from binance.exceptions import BinanceAPIException
 import global_flags
 from TypingClient import TypingClient
 from add_order import AddOrder
+from atomic_json import atomic_load_json, atomic_save_json
 from bot_generator import BotGenerator
 from conf import EMPTY_PENDING
 from events_queues import EventQueues
 from shared_time import sleep_speed, get_now
 from simulate_client import EndOfDatas, to_str_date
 from smart_trades_conf import *
-from tools import split_symbol, atomic_load_json, generate_order_id, \
-    update_order, log_wallet, atomic_save_json, get_order_price
+from tools import split_symbol, generate_order_id, \
+    update_order, log_wallet, anext
 
 
 def _benefice(log: logging, wallet: Dict[str, Decimal], initial_wallet: Dict[str, Decimal]) -> None:
@@ -63,34 +64,12 @@ class SmartTrade(BotGenerator):
     STATE_WAIT_TAKE_PROFIT = "wait_take_profit"
 
     STATE_FINISH = "finish"
-    STATE_FINISHED = BotGenerator.FINISHED
-    STATE_ERROR = BotGenerator.ERROR
+    STATE_FINISHED = BotGenerator.STATE_FINISHED
+    STATE_ERROR = BotGenerator.STATE_ERROR
     STATE_CANCELING = "canceling"
     STATE_CANCELED = "canceled"
 
-    def is_error(self):
-        return self.state == SmartTrade.STATE_ERROR
-
-    def is_finished(self):
-        return self.state == SmartTrade.STATE_FINISHED
-
     # TODO: cancel
-
-    async def _start(self,
-                     client: TypingClient,
-                     event_queues: EventQueues,
-                     queue: Queue,
-                     log: logging,
-                     init: Dict[str, str],
-                     **kwargs) -> 'WinterSummerBot':
-        self._generator = self.generator(client,
-                                         event_queues,
-                                         queue,
-                                         log,
-                                         init,
-                                         **kwargs)
-        await self.next()
-        return self
 
     async def generator(self,
                         client: AsyncClient,
@@ -386,7 +365,7 @@ class SmartTrade(BotGenerator):
                     yield self
 
                 elif self.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED:
-                    await self.buy_order.next()
+                    await anext(self.buy_order)
                     if self.buy_order.is_error():
                         self._set_state_error()
                         yield self
@@ -456,7 +435,7 @@ class SmartTrade(BotGenerator):
                                         f"{self.active_take_profit_condition} (+{percent * 100}%)"
                                         f" ({params.take_profit_base})")
                                     log.info(
-                                        f"Set trailing take profit, sell condition at {self.active_take_profit_sell} ("
+                                        f"Sell condition at {self.active_take_profit_sell} ("
                                         f"+{tp_sell_condition}%)")
                                 else:
                                     self.active_take_profit_condition = tp_price
@@ -516,7 +495,7 @@ class SmartTrade(BotGenerator):
                     yield self
 
                 elif self.state == SmartTrade.STATE_WAIT_TP_FILLED:
-                    await self.take_profit_order.next()
+                    await anext(self.take_profit_order)
                     if self.take_profit_order.is_error():
                         self._set_state_error()
                     elif self.take_profit_order.is_filled():
@@ -575,7 +554,7 @@ class SmartTrade(BotGenerator):
                     yield self
 
                 elif self.state == SmartTrade.STATE_WAIT_SL_FILLED:
-                    await self.stop_loss_order.next()
+                    await anext(self.stop_loss_order)
                     if self.stop_loss_order.is_error():
                         self._set_state_error()
                     elif self.stop_loss_order.is_filled():
@@ -743,14 +722,14 @@ async def bot(client: TypingClient,
     try:
         previous = bot_generator.copy()
         while True:
-            rc = await bot_generator.next()
+            rc = anext(await bot_generator)
             if not global_flags.simulate:
                 if bot_generator.is_error():
                     raise ValueError("ERROR state not saved")  # FIXME
                 if previous != bot_generator:
                     atomic_save_json(bot_generator, path)
                     previous = bot_generator.copy()
-            if rc == bot_generator.FINISHED:
+            if rc == bot_generator.STATE_FINISHED:
                 break
     except EndOfDatas:
         log.info("######: Final result of simulation:")
