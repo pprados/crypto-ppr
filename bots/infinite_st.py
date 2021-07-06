@@ -1,12 +1,11 @@
 # TODO: Conditional to buy after price rises.
 # Les conditions c'est si les prix montes.
 # J'attend que cela dépasse une resistance, alors je place mon ordre.
-import asyncio
 import logging
+import random
 from asyncio import Queue, sleep
 from pathlib import Path
 
-import aiohttp
 from aiohttp import ClientConnectorError
 from binance import AsyncClient
 from binance.exceptions import BinanceAPIException
@@ -18,14 +17,14 @@ from bot_generator import BotGenerator
 from events_queues import EventQueues
 from shared_time import sleep_speed, get_now
 from simulate_client import EndOfDatas
-from smart_trade import SmartTrade
 from smart_trades_conf import *
-from tools import log_wallet, anext, split_symbol
+from tools import log_wallet, anext, split_symbol, wallet_from_symbol
+from .smart_trade import SmartTrade
 
 
 # Utilisation d'un generateur pour pouvoir utiliser la stratégie
 # dans une autre.
-class FullBot(BotGenerator):
+class InfiniteBot(BotGenerator):
     # self.last_price c'est le prix de la dernière transaction
 
     POOLING_SLEEP = 2 * sleep_speed()
@@ -37,7 +36,7 @@ class FullBot(BotGenerator):
     STATE_ERROR = BotGenerator.STATE_ERROR
 
     def is_finished(self):
-        return self.state == FullBot.STATE_FINISHED
+        return self.state == InfiniteBot.STATE_FINISHED
 
     # TODO: cancel
 
@@ -69,6 +68,7 @@ class FullBot(BotGenerator):
                         **kwargs) -> None:
 
         try:
+            await sleep(random.randint(0, 5))
             if not init:
                 # Premier départ
                 now = get_now()
@@ -77,14 +77,19 @@ class FullBot(BotGenerator):
                     "bot_last_update": now,
                     "bot_stop": None,
                     "running": True,
-                    "state": FullBot.STATE_INIT,
+                    "state": InfiniteBot.STATE_INIT,
                     "smart_trade": None,
                     "wallet": {},
                 }
             self.update(init)
             del init
+            params = conf
+            symbol = params['st_conf']['symbol']
 
             # ---- Initialisation du bot
+            base, quote = split_symbol(symbol)
+            self.wallet = wallet_from_symbol(client_account, symbol)
+            self.initial_wallet = self.wallet.copy()
 
             # Récupération des paramètres
             params = conf
@@ -107,14 +112,16 @@ class FullBot(BotGenerator):
                         event_queues,
                         queue,
                         log,
+                        self.smart_trade,
                         generator_name="testing",
                         client_account=client_account,
                         conf=params['st_conf']
                     )
 
-
             # Finite state machine
             # C'est ici que le bot travaille sans fin, en sauvant sont état à chaque transition
+            yield self
+
             while True:
                 # try:
                 #     # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
@@ -125,11 +132,11 @@ class FullBot(BotGenerator):
                 # except QueueEmpty:
                 #     pass  # Ignore
 
-                if self.state == FullBot.STATE_INIT:
-                    self.state = FullBot.STATE_ADD_ST
+                if self.state == InfiniteBot.STATE_INIT:
+                    self.state = InfiniteBot.STATE_ADD_ST
 
-                elif self.state == FullBot.STATE_ADD_ST:
-
+                elif self.state == InfiniteBot.STATE_ADD_ST:
+                    log.warning("****** New Smarttrade")
                     self.smart_trade = await SmartTrade.create(
                         client,
                         event_queues,
@@ -139,13 +146,16 @@ class FullBot(BotGenerator):
                         client_account=client_account,
                         conf=params['st_conf'],
                     )
-                    self.state = FullBot.STATE_WAIT_ST
+                    self.state = InfiniteBot.STATE_WAIT_ST
                     yield self
-                elif self.state == FullBot.STATE_WAIT_ST:
+                elif self.state == InfiniteBot.STATE_WAIT_ST:
                     await anext(self.smart_trade)
                     if self.smart_trade.is_finished():
                         await sleep(1)
-                        self.state = FullBot.STATE_ADD_ST
+                        self.state = InfiniteBot.STATE_ADD_ST
+                    if self.smart_trade.is_error():
+                        log.error("Smart trade in error")
+                        self._set_state_error()
                     yield self
                 elif self.state == SmartTrade.STATE_ERROR:
                     self._set_state_error()
@@ -182,12 +192,10 @@ class FullBot(BotGenerator):
                 self._set_state_error()
                 yield self
 
-
-        except (ClientConnectorError, asyncio.TimeoutError, aiohttp.ClientOSError) as ex:
-            self._set_state_error()
-            # Attention, pas de sauvegarde.
-            log.exception(ex)
-            raise ex
+        # except (ClientConnectorError, asyncio.TimeoutError, aiohttp.ClientOSError) as ex:
+        #     # Attention, pas de sauvegarde.
+        #     log.exception(ex)
+        #     raise ex
 
 
 # Bot qui utilise le generateur correspondant
@@ -210,28 +218,31 @@ async def bot(client: TypingClient,
         log.info(f"Restart with state={state_for_generator['state']}")
 
     # Puis initialisation du generateur
-    bot_generator = await FullBot.create(client,
-                                         event_queues,
-                                         bot_queue,
-                                         log,
-                                         state_for_generator,
-                                         generator_name=bot_name,
-                                         client_account=client_account,
-                                         conf=conf,
-                                         )
+    bot_generator = await InfiniteBot.create(client,
+                                             event_queues,
+                                             bot_queue,
+                                             log,
+                                             state_for_generator,
+                                             generator_name=bot_name,
+                                             client_account=client_account,
+                                             conf=conf,
+                                             )
     try:
-        previous = None
         while True:
             rc = await anext(bot_generator)
             if not global_flags.simulate:
                 if bot_generator.is_error():
                     raise ValueError("ERROR state not saved")  # FIXME
-                if previous != bot_generator:
-                    atomic_save_json(bot_generator, path)
-                    previous = bot_generator.copy()
+                atomic_save_json(bot_generator, path)
             if rc == bot_generator.STATE_FINISHED:
                 break
     except EndOfDatas:
         log.info("######: Final result of simulation:")
         log_wallet(log, bot_generator.wallet)
+        raise
+    except (BinanceAPIException, ClientConnectorError, TimeoutError) as ex:
+        ex_msg = str(ex)
+        if not ex_msg or ex_msg == 'None':
+            ex_msg = ex.__class__.__name__
+        log.error(f"Binance communication error ({ex_msg})")
         raise

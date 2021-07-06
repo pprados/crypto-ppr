@@ -1,5 +1,4 @@
 import logging
-import random
 from asyncio import sleep, wait, FIRST_COMPLETED, TimeoutError, get_event_loop, Task
 from dataclasses import dataclass
 from decimal import Decimal
@@ -8,16 +7,17 @@ from importlib import import_module
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set
 
+import sdnotify
 from aiohttp import ClientConnectorError
 from binance.exceptions import BinanceAPIException
 
 import global_flags
 from TypingClient import TypingClient
 from atomic_json import atomic_load_json, atomic_save_json
-from conf import MIN_RECONNECT_WAIT, SLIPPING_TIME, CHECK_RESILIENCE
+from conf import MIN_RECONNECT_WAIT, SLIPPING_TIME
 from events_queues import EventQueues
 from simulate_client import SimulateFixedValues
-from tools import generate_bot_id
+from tools import generate_bot_id, log_wallet
 
 
 class EngineMsg(Enum):
@@ -118,7 +118,13 @@ class Engine:
         if '.' not in fn_name:
             fn_name += ".bot"
         module_path, fn = fn_name.rsplit(".", 1)
-        async_fun = getattr(import_module(module_path), fn)
+        try:
+            # Par defaut, les bots sont dans le packages bots
+            module = import_module("bots." + module_path)
+        except ModuleNotFoundError:
+            module = import_module(module_path)
+
+        async_fun = getattr(module, fn)
         self.event_queues.add_queue(id)
         self.bots.add(loop.create_task(async_fun(self.client,
                                                  self.client_account,
@@ -172,7 +178,7 @@ class Engine:
                 "bot": bot['bot'],
                 "state": state['state'],
                 "bot_start": int(state['bot_start']),
-                "bot_stop": int(state['bot_stop'])
+                "bot_stop": int(state['bot_stop']) if state['bot_stop'] else None
                 }
 
     async def list_bot_id(self):
@@ -194,8 +200,12 @@ class Engine:
         log.info("Start auto_trading")
         unfinished = []
 
+        n = sdnotify.SystemdNotifier()
+        n.notify("READY=1")  # Informe SystemD
+
         while True:
             self.bots: Set[Task] = set()
+            client = None
             try:
 
                 client = await self._init_client()  # Reset client
@@ -204,9 +214,12 @@ class Engine:
 
                 # Les infos du comptes, pour savoir ce qui est gardé par les agents
                 self.client_account: Dict[str, Any] = await client.get_account()
-                # Agent la balance par defaut pour les agents. FIXME: Glups, s'il y a des ordres en cours...
+                # Calcule la balance par defaut pour les agents. FIXME: Glups, s'il y a des ordres en cours...
                 for balance in self.client_account['balances']:
                     balance['agent_free'] = balance['free']
+
+                full_wallet = {x['asset']: x['free'] for x in self.client_account['balances']}
+                log_wallet(log, full_wallet)
 
                 # Regroupement de tous les évenments binance dans une queue unique, broadcasté vers les queues des bots
                 self.event_queues = EventQueues(client)
@@ -236,9 +249,6 @@ class Engine:
                                                           timeout=SLIPPING_TIME,
                                                           # Ajout éventuellement de nouveaux bots
                                                           return_when=FIRST_COMPLETED)
-                        if CHECK_RESILIENCE and random.randint(0, 100) < CHECK_RESILIENCE:
-                            log.warning("FAKE Timeout")
-                            raise TimeoutError("Fake timeout")
                         for task in finished:
                             task.result()  # Raise exception if error
                         assert unfinished is not None
@@ -248,10 +258,14 @@ class Engine:
                     # if not unfinished:
                     #     # No more coroutine
                     #     return
+                    n.notify("WATCHDOG=1")  # FIXME: moins souvent. Informe SystemD que je suis toujours vivant
 
             except (BinanceAPIException, ClientConnectorError, TimeoutError) as ex:
                 # FIXME: Bug en cas de perte totale du réseau, sur la résolution DNS
                 # Wait and retry
+                if isinstance(ex, BinanceAPIException) and ex.code == 0 \
+                        and ex.message.startswith('Invalid JSON error message from Binance'):
+                    log.error(ex.message)
                 ex_msg = str(ex)
                 if not ex_msg or ex_msg == 'None':
                     ex_msg = ex.__class__.__name__
@@ -264,11 +278,17 @@ class Engine:
                     })
                 log.info(f"Sleep {MIN_RECONNECT_WAIT}s before restart...")
                 await sleep(MIN_RECONNECT_WAIT)
-                for task in unfinished:
-                    task.cancel()
                 log.info("Try to restart")
             except Exception as ex:
                 log.exception(ex)
                 raise
+            # TODO
+            finally:
+                if self.bots:
+                    for b in self.bots:
+                        b.cancel()
+                if client:
+                    await client.close_connection()
+                    client = None
             if global_flags.simulate:
                 break

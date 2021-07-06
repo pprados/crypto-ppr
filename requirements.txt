@@ -1,10 +1,15 @@
+cython
 click
-#python-binance
-#git+git@github.com:pprados/python-binance.git@master
+python-binance
+#git+https://github.com/pprados/python-binance.git
 jstyleson
 python-dotenv
+fastapi
+uvicorn
+sdnotify
+
+setproctitle
 pandas
-fastapi[all]
 
 pytest
 pytest-asyncio

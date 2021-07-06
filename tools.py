@@ -1,32 +1,42 @@
 import logging
-import os
 import re
-from asyncio import Queue
+from datetime import datetime
 from decimal import Decimal
-from json import JSONDecodeError
-from pathlib import Path
 from random import randint
 from typing import Any, Tuple, Dict, Union, Optional, Callable
+from asyncio import TimeoutError
 
 import jstyleson as json
 from binance import AsyncClient
 from binance.enums import *
 from binance.exceptions import BinanceAPIException
-from binance.helpers import round_step_size
 
-from conf import NO_SAVE
+from conf import CHECK_RESILIENCE
 from shared_time import get_now, ts_to_str
 
 Order_attr = Union[str,float,Decimal,int,bool]
 Order = Dict[str,Order_attr]
 Wallet = Dict[str,Decimal]
 
+if CHECK_RESILIENCE:
+    rescue_period = datetime.now().timestamp()
+
+log=logging.getLogger(__name__)
 async def anext(ait):
+    global rescue_period
+    if CHECK_RESILIENCE and randint(0, 100) < CHECK_RESILIENCE:
+        x = datetime.now().timestamp()
+        if x - rescue_period > 2:
+            rescue_period = x
+            raise TimeoutError("Fake timeout")
+
     return await ait.__anext__()
 
-def benefice(log: logging, symbol: str, wallet: Dict[str, Decimal], base_solde: Decimal, quote_solde: Decimal) -> None:
-    base, quote = split_symbol(symbol)
-    log.warning(f"###### Result: {wallet[base] - base_solde} {base} / {wallet[quote] - quote_solde} {quote}")
+def benefice(log: logging, wallet: Dict[str, Decimal], initial_wallet: Dict[str, Decimal]) -> None:
+    diff = {k: float(v - initial_wallet[k]) for k, v in wallet.items()}
+    log_wallet(log,initial_wallet,prefix="Initial:")
+    log_wallet(log,wallet,prefix="Current:")
+    log.warning(f"###### Result: {diff}")
 
 
 def _parse_order(order: Dict[str, Any]) -> Tuple[str, str, Decimal, Decimal]:
@@ -276,7 +286,7 @@ def _dump_order(log:Callable,
         pre_suffix = " for take profit"
     str_price = "MARKET" if order['type'] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER) else str_d(price)
     if quantity and str_price!="MARKET":
-        log(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {token} at {str_price} {other}{pre_suffix}{suffix}")
+        log(f"{prefix}{side} {str_d(quantity)} {token} at {str_price} {other}{pre_suffix}{suffix}")
     elif str_price == "MARKET":
         if 'cummulativeQuoteQty' in order:
             calculate_price = Decimal(order['cummulativeQuoteQty'])/Decimal(order['executedQty'])
@@ -297,8 +307,8 @@ def log_add_order(log: logging, order: Dict[str, Any],prefix=None):
 def log_order(log: logging, order: Dict[str, Any],prefix="****** "):
     _dump_order(log.warn, order, prefix)
 
-def log_wallet(log: logging, wallet: Wallet) -> None:
-    log.info("wallet:" + " ".join([f"{k}={v}" for k, v in wallet.items()]))
+def log_wallet(log: logging, wallet: Wallet,prefix="wallet:") -> None:
+    log.info(prefix + " ".join([f"{k}={v}" for k, v in wallet.items()]))
 
 
 def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:

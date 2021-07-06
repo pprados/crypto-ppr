@@ -25,7 +25,7 @@ import global_flags
 from TypingClient import TypingClient
 from atomic_json import atomic_load_json, atomic_save_json
 from bot_generator import BotGenerator
-from conf import STREAM_MSG_TIMEOUT
+from conf import STREAM_MSG_TIMEOUT, CHECK_RESILIENCE
 from events_queues import EventQueues
 from simulate_client import EndOfDatas
 from tools import log_order, update_wallet, get_order_price, log_add_order, anext, log_wallet, generate_order_id, \
@@ -37,6 +37,8 @@ class AddOrder(BotGenerator):
 
     STATE_INIT = "init"
     STATE_ADD_ORDER = "add_order"
+    STATE_ADD_ORDER_ACCEPTED = "add_order_accepted"
+    STATE_RETRY_ADD_ORDER = "retry_add_order"
     STATE_WAIT_ORDER = "wait_order"
     STATE_ORDER_CONFIRMED = "order_confirmed"
     STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET = "wait_order_filled_with_websocket"
@@ -46,7 +48,6 @@ class AddOrder(BotGenerator):
     STATE_ORDER_EXPIRED = "order_expired"
     STATE_CANCELING = "order_canceling"
     STATE_CANCELED = "order_canceled"
-    STATE_ERROR = "order_error"
 
     @property
     def price(self) -> Decimal:
@@ -93,6 +94,8 @@ class AddOrder(BotGenerator):
                 "order": kwargs['order'],
                 "newClientOrderId": kwargs['order'].get("newClientOrderId",generate_order_id("AddOrder"))
             }
+        else:
+            log.info(f"Restart with state={init['state']}")
         self.update(init)
         del init
 
@@ -109,6 +112,8 @@ class AddOrder(BotGenerator):
             # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
             # Donc, la première fois, on doit utiliser le pooling
             self.state = AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+        if self.state == AddOrder.STATE_ADD_ORDER:
+            self.state = AddOrder.STATE_RETRY_ADD_ORDER
         symbol = self.order['symbol']
 
         # Finite state
@@ -117,27 +122,45 @@ class AddOrder(BotGenerator):
 
             if self.state == AddOrder.STATE_INIT:
                 self.state = AddOrder.STATE_ADD_ORDER
+                yield self
+            elif self.state == AddOrder.STATE_RETRY_ADD_ORDER:
+                # Detection de doublon, via newClientOrderId
+                if "newClientOrderId" in self.order:
+                    orders=await client.get_all_orders(symbol=self.order['symbol'],limit=100)
+                    order_id=self.order["newClientOrderId"]
+                    orders=list(filter(lambda x: x['clientOrderId'] == order_id, orders))
+                    if orders:
+                        self.new_order=orders[0]
+                        self.state = AddOrder.STATE_ADD_ORDER_ACCEPTED
+                        yield self
+                        continue
+                else:
+                    log.warning("Impossible to detect a duplicate order. May be duplicate.")
+                # Pas de doublon, ou détection impossible
+                self.state = AddOrder.STATE_ADD_ORDER
             elif self.state == AddOrder.STATE_ADD_ORDER:
                 # Prépare la création d'un ordre
                 await client.create_test_order(**self.order)
                 # Puis essaye de l'executer
                 try:
-                    new_order = await client.create_order(**self.order)
+                    log.info(f"--------- Push order {self.order}")
+                    self.new_order = await client.create_order(**self.order)
+                    log.info(f"--------- Order pushed {self.new_order}")
                 except BinanceAPIException as ex:
                     if ex.code == -2010:  # Duplicate order sent ?, ignore
                         if ex.message == "Duplicate order sent.":
                             # Retrouve l'ordre dupliqué.
                             orders = await client.get_all_orders(symbol=symbol)
-                            new_order = next(
+                            self.new_order = next(
                                 filter(lambda x: x.get("clientOrderId", "") == self.order["newClientOrderId"], orders))
                             # et continue
 
                         elif ex.message == "Account has insufficient balance for requested action.":
-                            self.state = AddOrder.STATE_ERROR
+                            self._set_state_error()
                             yield self
                             continue
                         elif ex.message.startswith("Filter failure:"):
-                            self.state = AddOrder.STATE_ERROR
+                            self._set_state_error()
                             yield self
                             raise
                         elif ex.message == "Stop price would trigger immediately.":
@@ -145,7 +168,7 @@ class AddOrder(BotGenerator):
                             # https://dev.binance.vision/t/order-would-trigger-immediately-error/245/2
                             log.error(f"{ex.message}")
                             log_order(new_order)
-                            self.state = AddOrder.STATE_ERROR
+                            self._set_state_error()
                             yield self
                             continue
                         elif ex.message == "Stop price would trigger immediately.":
@@ -153,7 +176,12 @@ class AddOrder(BotGenerator):
                             raise
                     else:
                         raise
+                self.state =AddOrder.STATE_ADD_ORDER_ACCEPTED
+                yield self
 
+            elif self.state == AddOrder.STATE_ADD_ORDER_ACCEPTED:
+                new_order = self.new_order
+                del self.new_order
                 # C'est bon, il est passé
                 new_order["side"] = self.order["side"]
                 new_order["type"] = self.order["type"]
@@ -259,6 +287,7 @@ class AddOrder(BotGenerator):
             elif self.state == AddOrder.STATE_ORDER_FILLED:
                 self.state = AddOrder.STATE_FINISHED
                 yield self
+            elif self.state == AddOrder.STATE_FINISHED:
                 return
             elif self.state == AddOrder.STATE_CANCELING:
                 try:
@@ -310,16 +339,13 @@ async def bot(client: TypingClient,
                                           wallet=wallet,
                                           )
     try:
-        previous = None
         while True:
             rc = await anext(bot_generator)
             if not global_flags.simulate:
                 if bot_generator.is_error():
                     raise ValueError("ERROR state not saved")  # FIXME
-                if previous != bot_generator:
-                    atomic_save_json(bot_generator, path)
-                    previous = bot_generator.copy()
-            if rc == bot_generator.STATE_FINISHED:
+                atomic_save_json(bot_generator, path)
+            if rc == AddOrder.STATE_FINISHED:
                 break
     except EndOfDatas:
         log.info("######: Final result of simulation:")

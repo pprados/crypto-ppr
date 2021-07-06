@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import logging
 import os
 import sys
@@ -7,6 +8,7 @@ from decimal import getcontext, FloatOperation
 from typing import Dict, Any, Optional
 
 import click as click
+import sdnotify
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -31,7 +33,15 @@ async def startup():
 app = FastAPI(on_startup=[startup])
 app.router.route_class = JsonCommentRoute
 
-engine: Optional[Engine] = None
+#engine: Optional[Engine] = None  # Python 3.8
+engine = None  # Python 3.7
+
+
+@app.get("/bots/", status_code=status.HTTP_201_CREATED)
+async def list_bot_id():
+    """ List all bots Id """
+    rc= await engine.list_bot_id()
+    return rc
 
 
 @app.post("/bots/", status_code=status.HTTP_201_CREATED)
@@ -39,11 +49,6 @@ async def create_bot(
         conf: Dict[str, Any],
         id: Optional[str] = None):
     return await engine.create_bot(id, conf)
-
-
-@app.get("/bots/", status_code=status.HTTP_201_CREATED)
-async def list_bot_id():
-    return await engine.list_bot_id()
 
 
 @app.delete("/bots/{id}")
@@ -64,13 +69,14 @@ def init(simulate: bool):
     ctx.prec = 8
     ctx.traps[FloatOperation] = True
 
-    load_dotenv()
-    if os.environ.get("DEBUG", "false") == "true":
+    if os.environ.get("DEBUG", "false").lower() == "true":
         tracemalloc.start()
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
 
+    # TODO: Voir http://www.uvicorn.org/ pour paramétrer les logs
+    # TODO: https://docs.gunicorn.org/en/latest/settings.html#logging
     # create file handler which logs even debug messages
     fh = logging.FileHandler('ctx/auto_trading.log')
     fh.setLevel(logging.INFO)
@@ -89,9 +95,13 @@ def init(simulate: bool):
               is_flag=True)
 def main(simulate: bool):
     init(simulate)
+    # TODO: Voir http://www.uvicorn.org/#running-with-gunicorn
+    # TODO: voir sync worker : https://docs.gunicorn.org/en/latest/design.html#sync-workers
+    # pour simplifier le run
     uvicorn.run(
         app,
         host="0.0.0.0", port=8000,
+        debug=True
     )
 
 

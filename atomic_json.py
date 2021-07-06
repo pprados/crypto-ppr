@@ -17,28 +17,39 @@ def _serialize(obj):
         return float(str_d(obj))
 
     # Detecte les generators pour ne pas les sauvers
-    if hasattr(obj,'ag_frame'):
+    if hasattr(obj, 'ag_frame'):
         return '_generator'
     return obj.__dict__
 
 
-def atomic_save_json(obj: Any, filename: Path,comment:Optional[str]=None) -> None:
+def atomic_save_json(obj: Any, filename: Path, comment: Optional[str] = None) -> None:
     if NO_SAVE:
+        return
+    old, _ = atomic_load_json(filename)
+
+    json_obj = json.dumps(obj,
+                          default=_serialize,
+                          skipkeys=True,
+                          indent=2)
+    json_old = json.dumps(old,
+                          default=_serialize,
+                          skipkeys=True,
+                          indent=2)
+    if json_old == json_obj:
+        # Same file. Do nothing to to save disk
         return
     new_filename = filename.parent / (filename.name + ".new")
     old_filename = filename.parent / (filename.name + ".old")
     with open(new_filename, "w") as f:
         if comment:
-            f.write("// "+comment+"\n")
-        json.dump(obj, f,
-                  default=_serialize,
-                  skipkeys=True,
-                  indent=2)
+            f.write("// " + comment + "\n")
+        f.write(json_obj)
     os.sync()
     if filename.exists():
         filename.rename(old_filename)
     new_filename.rename(filename)
-    old_filename.unlink(missing_ok=True)
+    if old_filename.exists():
+        old_filename.unlink()
     os.sync()
 
 
@@ -54,8 +65,10 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
                     f,
                     parse_float=Decimal,
                 )  # Try to parse
-            filename.unlink(missing_ok=True)
-            old_filename.unlink(missing_ok=True)
+            if filename.exists():
+                filename.unlink()
+            if old_filename.exists():
+                old_filename.unlink()
             new_filename.rename(filename)
             os.sync()
             return obj, False
@@ -68,7 +81,8 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
             rollback = True
     if old_filename.exists():
         # Cela a crashé lors d'un JSONDecodeError, pendant qu'on resoud l'état.
-        filename.unlink(missing_ok=True)
+        if filename.exists():
+            filename.unlink()
         old_filename.rename(filename)
         os.sync()
         rollback = True
@@ -79,5 +93,4 @@ def atomic_load_json(filename: Path) -> Tuple[Any, bool]:
                              parse_float=Decimal
                              ), rollback
     else:
-        return None,False
-
+        return None, False

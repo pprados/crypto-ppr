@@ -192,8 +192,75 @@ Cela peut être valorisé dans un fichier `.env`
 - grid bot
 - smart buy, sell, ...
 
+# Service
+https://github.com/torfsen/python-systemd-tutorial
+sudo apt-get install -y python3-sdnotify
+
+systemctl --user start    auto-trading
+systemctl --user status   auto-trading
+systemctl --user stop     auto-trading
+systemctl --user restart  auto-trading
+journalctl --user-unit    auto-trading
+systemctl --user daemon-reload
+
+systemctl --user daemon-reload ; systemctl --user restart   auto-trading ; journalctl --user-unit    auto-trading
+
+## Installation Raspberry PI
+- Création de l'image
+rpi-imager
+- ajouter un fichier ssh vide à la racine du boot
+
+  
+- Connexion pour changement password (via une connexion Ethernet)
+ssh -o PreferredAuthentications=password pi@192.168.0.71 
+passwd
+  
+- Copie de clée ssh pour connection
+ssh-copy-id -i ~/.ssh/id_rsa.pub -o PreferredAuthentications=password pi@192.168.0.71
+ssh pi@192.168.0.71
+
+sudo raspi-config # mise à jour wifi, vnc, etc
+sudo apt full-upgrade  # Mise à jour OS
+sudo reboot
+
+sudo apt-get update
+sudo apt-get install libffi-dev
+  
+- Copie des fichiers
+sudo mkdir /opt/auto_trading 
+sudo chown pi:pi /opt/auto_trading
+CTRL-D  
+rsync -av -e ssh --exclude='venv' * pi@192.168.0.71:/opt/auto_trading
+rcp .env pi@192.168.0.71:/opt/auto_trading
+  
+ssh pi@192.168.0.71
+cd /opt/auto_trading
+python3 -m venv venv
+source venv/bin/activate
+sudo apt-get install libatlas-base-dev
+pip3 install -r requirements.txt
+
+- Vérifier le démarrage en local
+python3 auto_trading.py
+
+## En faire un service
+sudo ln -s /opt/auto_trading/auto_trading.service /etc/systemd/system
+
+- Vérifier que cela fonctionne
+systemctl daemon-reload
+sudo systemctl start  auto_trading
+sudo systemctl status  auto_trading
+sudo journalctl --unit=auto_trading
+  
+- Activer au reboot
+sudo systemctl enable  auto_trading
+
+## Mise à jour
+rsync -av -e ssh --exclude='venv' * pi@192.168.0.71:/opt/auto_trading
+
 # Notes
 Type d'ordres https://www.binance.com/en/support/articles/360033779452
 
-
+- https://www.starlette.io/responses/#streamingresponse
+  https://www.starlette.io/responses/#sseresponseeventsourceresponse
 - Calcul de la volatilité voir http://boursegestionportefeuille.e-monsite.com/pages/calcul-de-volatilite-bourse.html

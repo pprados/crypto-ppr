@@ -77,3 +77,5 @@
 // - Ajouter un calcul de la volatilité, pour activer ou non, automatiquement le trailing TP ou SL
 // - Ajouter les ordres "inverse", pour inverser les devices. Vendre avant d'acheter.
 //   C'est util pour la vente à découvert, ou pour traider BTC/ETH par exemple.
+// - Rendre compatible avec les futures avec effet de levier
+// - Trailing fini en Market ou en Limit ?

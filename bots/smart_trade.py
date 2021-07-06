@@ -15,7 +15,7 @@ from binance.exceptions import BinanceAPIException
 
 import global_flags
 from TypingClient import TypingClient
-from add_order import AddOrder
+from .add_order import AddOrder
 from atomic_json import atomic_load_json, atomic_save_json
 from bot_generator import BotGenerator
 from conf import EMPTY_PENDING
@@ -58,8 +58,6 @@ class SmartTrade(BotGenerator):
     STATE_WAIT_TAKE_PROFIT = "wait_take_profit"
 
     STATE_FINISH = "finish"
-    STATE_FINISHED = BotGenerator.STATE_FINISHED
-    STATE_ERROR = BotGenerator.STATE_ERROR
     STATE_CANCELING = "canceling"
     STATE_CANCELED = "canceled"
 
@@ -93,7 +91,7 @@ class SmartTrade(BotGenerator):
                     self.activate_trailing_buy = True
                 if self.activate_trailing_buy:
                     if trade_price > self.buy_condition:
-                        log.info(f"Price goes up. Buy at market")
+                        log.info(f"Price goes up. Buy at market (~{trade_price} {quote})")
                         self.state = SmartTrade.STATE_CREATE_BUY_ORDER  # TODO: market condition
                     else:
                         new_buy_condition = trade_price * (1 + self.trailing_buy)
@@ -160,7 +158,7 @@ class SmartTrade(BotGenerator):
                         self.active_take_profit_trailing = True
                     elif self.active_take_profit_trailing:
                         if trigger_price <= self.active_take_profit_sell:
-                            log.info(f"Try to take-profit with {trigger_price}...")
+                            log.info(f"Try to take-profit with ~{trigger_price}...")
                             self.state = SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
                         else:
                             if params.take_profit_trailing < 0:
@@ -193,6 +191,8 @@ class SmartTrade(BotGenerator):
                     "activate_trailing_take_profit": False,
                     "activate_trailing_stop_loss": False,
                 }
+            else:
+                pass  # Reprise
             self.update(init)
             del init
 
@@ -257,6 +257,7 @@ class SmartTrade(BotGenerator):
 
             # Finite state machine
             # C'est ici que le bot travaille sans fin, en sauvant sont état à chaque transition
+            yield self
             while True:
                 # try:
                 #     # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
@@ -320,7 +321,7 @@ class SmartTrade(BotGenerator):
                         quantity = params.unit  # TODO: unit ou quote ?
                         order["quantity"] = quantity
                     elif params.size:
-                        order["quoteOrderQty"] = balance_quote['free'] * params.size
+                        order["quoteOrderQty"] = self.wallet[quote] * params.size
                     elif params.total:
                         order["quoteOrderQty"] = params.total
 
@@ -359,11 +360,9 @@ class SmartTrade(BotGenerator):
                     await anext(self.buy_order)
                     if self.buy_order.is_error():
                         self._set_state_error()
-                        yield self
                     elif self.buy_order.is_filled():
                         self.state = SmartTrade.STATE_BUY_ORDER_FILLED
-                        yield self
-                    # TODO elif self.buy_order.is_cancelled() etc.
+                    yield self
 
 
                 # ---------------- Aiguillage suivant les cas
@@ -677,9 +676,8 @@ class SmartTrade(BotGenerator):
 
 
         except (ClientConnectorError, asyncio.TimeoutError, aiohttp.ClientOSError) as ex:
-            self._set_state_error()
             # Attention, pas de sauvegarde.
-            raise
+            raise ex
 
 
 
@@ -711,18 +709,16 @@ async def bot(client: TypingClient,
                                             client_account=client_account,
                                             )
     try:
-        previous = None
         while True:
             rc = anext(await bot_generator)
             if not global_flags.simulate:
                 if bot_generator.is_error():
                     raise ValueError("ERROR state not saved")  # FIXME
-                if previous != bot_generator:
-                    atomic_save_json(bot_generator, path)
-                    previous = bot_generator.copy()
+                atomic_save_json(bot_generator, path)
             if rc == bot_generator.STATE_FINISHED:
                 break
     except EndOfDatas:
         log.info("######: Final result of simulation:")
+        log_wallet(log, bot_generator.initial_wallet,prefix="Before:")
         log_wallet(log, bot_generator.wallet)
         raise

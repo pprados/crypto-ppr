@@ -57,7 +57,6 @@ class BotGenerator(dict):
                                          log,
                                          init,
                                          **kwargs)
-        #await self.next()
         await anext(self)
         return self
 
@@ -95,7 +94,7 @@ class BotGenerator(dict):
 
 
     def _set_state_error(self):
-        self.state = "ERROR"
+        self.state = BotGenerator.STATE_ERROR
         self.bot_stop=get_now()
         self.running=False
 
