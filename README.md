@@ -250,7 +250,8 @@ sudo ln -s /opt/auto_trading/auto_trading.service /etc/systemd/system
 systemctl daemon-reload
 sudo systemctl start  auto_trading
 sudo systemctl status  auto_trading
-sudo journalctl --unit=auto_trading
+sudo journalctl --unit=auto_trading -f
+sudo systemctl stop  auto_trading
   
 - Activer au reboot
 sudo systemctl enable  auto_trading
