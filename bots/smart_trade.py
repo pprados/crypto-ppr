@@ -3,7 +3,7 @@
 # J'attend que cela dépasse une resistance, alors je place mon ordre.
 import asyncio
 import logging
-from asyncio import Queue, sleep
+from asyncio import Queue
 from pathlib import Path
 
 import aiohttp
@@ -15,16 +15,16 @@ from binance.exceptions import BinanceAPIException
 
 import global_flags
 from TypingClient import TypingClient
-from .add_order import AddOrder
 from atomic_json import atomic_load_json, atomic_save_json
 from bot_generator import BotGenerator
 from conf import EMPTY_PENDING
 from events_queues import EventQueues
 from shared_time import sleep_speed, get_now
 from simulate_client import EndOfDatas, to_str_date
-from smart_trades_conf import *
+from .smart_trades_conf import *
 from tools import split_symbol, generate_order_id, \
     update_order, log_wallet, anext, wallet_from_symbol, benefice
+from .add_order import AddOrder
 
 
 # Utilisation d'un generateur pour pouvoir utiliser la stratégie
@@ -174,6 +174,19 @@ class SmartTrade(BotGenerator):
                     log.info(f"Try to take-profit with {trigger_price} (without trailing)...")
                     self.state = SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
 
+                # Gestion du minimal TP
+                if params.minimal:
+                    if trigger_price >= self.min_tp_price:
+                        now = get_now()
+                        if self.activate_min_tp:
+                            if self.activate_min_tp + params.minimal_timeout > now:
+                                log.warning("****** Activate Min TP...")
+                        else:
+                            self.activate_min_tp = now
+                            log.info(f"Min-TP start timer... {to_str_date(self.activate_min_tp)}")
+                    else:
+                        self.activate_min_tp = None
+
         try:
             if not init:
                 # Premier départ
@@ -219,7 +232,7 @@ class SmartTrade(BotGenerator):
 
             # Récupération des balances du wallet master
             base, quote = split_symbol(params.symbol)
-            self.wallet = wallet_from_symbol(client_account,params.symbol)
+            self.wallet = wallet_from_symbol(client_account, params.symbol)
             self.initial_wallet = self.wallet.copy()
 
             # ----------------- Reprise du context des sous-generateor après un crash ou un reboot
@@ -230,30 +243,30 @@ class SmartTrade(BotGenerator):
                 # Reset les sous generateur
                 if 'buy_order' in self and self.buy_order:
                     self.buy_order = await AddOrder.create(client,
-                                                          event_queues,
-                                                          queue,
-                                                          log,
-                                                          self.buy_order,
-                                                          wallet=self.wallet,
-                                                          )
+                                                           event_queues,
+                                                           queue,
+                                                           log,
+                                                           self.buy_order,
+                                                           wallet=self.wallet,
+                                                           )
 
                 if 'take_profit_order' in self and self.take_profit_order:
                     self.take_profit_order = await AddOrder.create(client,
-                                                                  event_queues,
-                                                                  queue,
-                                                                  log,
-                                                                  self.take_profit_order,
-                                                                  wallet=self.wallet,
-                                                                  )
+                                                                   event_queues,
+                                                                   queue,
+                                                                   log,
+                                                                   self.take_profit_order,
+                                                                   wallet=self.wallet,
+                                                                   )
 
                 if 'stop_loss_order' in self and self.stop_loss_order:
                     self.stop_loss_order = await AddOrder.create(client,
-                                                                event_queues,
-                                                                queue,
-                                                                log,
-                                                                self.stop_loss_order,
-                                                                wallet=self.wallet,
-                                                                )
+                                                                 event_queues,
+                                                                 queue,
+                                                                 log,
+                                                                 self.stop_loss_order,
+                                                                 wallet=self.wallet,
+                                                                 )
 
             # Finite state machine
             # C'est ici que le bot travaille sans fin, en sauvant sont état à chaque transition
@@ -333,10 +346,10 @@ class SmartTrade(BotGenerator):
                         order["price"] = params.price
                     elif params.mode == COND_LIMIT_ORDER:
                         # TODO Will be placed on the exchange order book when the conditional order triggers
-                        pass
+                        raise NotImplementedError("COND_LIMIT_ORDER")
                     elif params.mode == COND_MARKET_ORDER:
                         # TODO Will be placed on the exchange order book when the conditional order triggers
-                        pass
+                        raise NotImplementedError("COND_MARKET_ORDER")
                     else:
                         raise ValueError("type error")
 
@@ -409,6 +422,13 @@ class SmartTrade(BotGenerator):
                                     percent = (params.take_profit_limit / self.buy_order.price) - 1
                                 self.take_profit_percent = percent
                                 tp_price = self.buy_order.price * (1 + percent)
+
+                                if params.minimal:
+                                    self.min_tp_price = self.buy_order.price * (1 + params.minimal)
+                                    log.info(
+                                        f"Set minimal take-profit condition at "
+                                        f"{self.min_tp_price} {quote}")
+
                                 if params.take_profit_trailing:
                                     if params.take_profit_trailing < 0:
                                         self.active_take_profit_condition = tp_price
@@ -417,7 +437,7 @@ class SmartTrade(BotGenerator):
                                     else:
                                         self.active_take_profit_condition = tp_price * (1 + params.take_profit_trailing)
                                         self.active_take_profit_sell = tp_price
-                                    tp_sell_condition=(self.active_take_profit_sell / self.buy_order.price - 1) * 100
+                                    tp_sell_condition = (self.active_take_profit_sell / self.buy_order.price - 1) * 100
                                     assert self.active_take_profit_sell < self.active_take_profit_condition
                                     assert tp_sell_condition > 0
                                     log.info(
@@ -680,7 +700,6 @@ class SmartTrade(BotGenerator):
             raise ex
 
 
-
 # Bot qui utilise le generateur correspondant
 # et se charge de sauver le context.
 async def bot(client: TypingClient,
@@ -707,10 +726,11 @@ async def bot(client: TypingClient,
                                             state_for_generator,
                                             generator_name=bot_name,
                                             client_account=client_account,
+                                            conf=conf,
                                             )
     try:
         while True:
-            rc = anext(await bot_generator)
+            rc = await anext(bot_generator)
             if not global_flags.simulate:
                 if bot_generator.is_error():
                     raise ValueError("ERROR state not saved")  # FIXME
@@ -719,6 +739,6 @@ async def bot(client: TypingClient,
                 break
     except EndOfDatas:
         log.info("######: Final result of simulation:")
-        log_wallet(log, bot_generator.initial_wallet,prefix="Before:")
+        log_wallet(log, bot_generator.initial_wallet, prefix="Before:")
         log_wallet(log, bot_generator.wallet)
         raise

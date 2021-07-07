@@ -96,6 +96,6 @@ async def _manage_user_stream(mixed_queue:EventQueues, socket:ReconnectingWebsoc
                     msg['_stream'] = "@user"
                     mixed_queue.broadcast_msg(msg)
         except RuntimeError as ex:
-            sleep(MIN_RECONNECT_WAIT)
+            await sleep(MIN_RECONNECT_WAIT)
             mixed_queue.restart()
 

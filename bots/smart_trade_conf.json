@@ -33,12 +33,15 @@
     // La cible du profit en valeur ou % (TODO: negatif ?)
     // 100.0: déclenche à 100.0 quote
     // "+3%": déclenche au prix d'achat+3% (doit etre positif)
-    "price": "0.01%",
+    "price": "0.02%",
 
     // "+3%": déclenche à la cible+3%, et vend si descend sous la cible (ne peut inf. à la cible hors market)
     // "-3%": déclenche à la cible, et vend si descend à la cible-3%
     "trailing": "-0.05%",
 
+    // Take profit minimum, si le cours remonte pendant 'minimal_timeout', alors le SL est à ce niveau
+    "minimal" : "0.01%",
+    "minimal_timeout": 2,
   },
 
   // Il est possible d'indiquer simultanément des règles de stop loss.

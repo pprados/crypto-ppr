@@ -244,6 +244,8 @@ pip3 install -r requirements.txt
 python3 auto_trading.py
 
 ## En faire un service
+ssh -p 8072 pi@88.124.108.99
+
 sudo ln -s /opt/auto_trading/auto_trading.service /etc/systemd/system
 
 - Vérifier que cela fonctionne

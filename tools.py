@@ -335,7 +335,7 @@ def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:
     assert wallet[quote] >= 0
 
 def get_order_price(order:Order):
-    if "cummulativeQuoteQty" in order:
+    if "origQty" in order:
         return Decimal(order["cummulativeQuoteQty"]) / Decimal(order["origQty"])
     else:
         return Decimal(order['price'])

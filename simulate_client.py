@@ -378,6 +378,7 @@ class TestBinanceClient(TypingClient):
         else:
             quantity = Decimal(order["quantity"])
         if order["type"] == ORDER_TYPE_MARKET:
+            assert 'origQty' not in order
             order["cummulativeQuoteQty"] = str_d(quantity)
             order["executedQty"] = str_d(quantity)
             order["price"] = current_price
@@ -472,7 +473,7 @@ class TestBinanceClient(TypingClient):
 
     def add_order(self, order: Order) -> Order:
         balance_base, balance_quote = self._split_balance(order["symbol"])
-        if order["type"] in (ORDER_TYPE_LIMIT):
+        if order["type"] == ORDER_TYPE_LIMIT:
             quantity = Decimal(order["quantity"])
             if order["side"] == SIDE_SELL:
                 balance_base["free"] -= quantity  # FIXME
@@ -567,8 +568,8 @@ class TestBinanceClient(TypingClient):
     async def create_order(self, **order):
         new_order = order.copy()
         new_order["clientOrderId"] = order['newClientOrderId']
-        if 'quantity' in order:
-            new_order["origQty"] = order["quantity"]
+        # if 'quantity' in order:
+        #     new_order["origQty"] = order["quantity"]
         quote_qty = Decimal(0)  # Simplification de la gestion des quotes qty
         if 'quoteOrderQty' in order:
             quote_qty = order['quoteOrderQty']

@@ -9,7 +9,8 @@ from binance.enums import ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET, ORDER_TYPE_TAKE_P
 
 from events_queues import EventQueues
 from simulate_client import TestBinanceClient, AbstractSimulateValue, _SimulateUserSocket
-from smart_trade import SmartTrade
+from bots.smart_trade import SmartTrade
+from tools import anext
 
 api_key = os.environ["BINANCE_API_KEY"]
 api_secret = os.environ["BINANCE_API_SECRET"]
@@ -77,16 +78,20 @@ async def test_simple_order_with_unit_at_market_with_event():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
 
 
 async def test_simple_order_with_total_at_market_with_event():
@@ -119,13 +124,17 @@ async def test_simple_order_with_total_at_market_with_event():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert Decimal(smart_trade.buy_order.order['executedQty']) == Decimal('0.1')
@@ -161,13 +170,17 @@ async def test_simple_order_with_size_at_market_with_event():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert Decimal(smart_trade.buy_order.order['executedQty']) == Decimal('0.1')
@@ -211,13 +224,17 @@ async def test_simple_order_with_with_poll(mock_recv_method):
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
 
@@ -253,19 +270,24 @@ async def test_simple_order_with_unit_at_limit_with_event():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_LIMIT
     assert smart_trade.buy_order.order['price'] == Decimal(900)
     assert smart_trade.buy_order.order['executedQty'] == "0.1"
 
 
+@pytest.mark.skip(reason="COND_LIMIT_ORDER not implemented")
 async def test_simple_order_with_cond_limit_order_at_market_with_event():
     """ Test le passage d'un ordre simple, sur unit, avec condition limit, sans trailing, validé par un event """
     conf = {
@@ -298,18 +320,23 @@ async def test_simple_order_with_cond_limit_order_at_market_with_event():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == 0.1
 
 
+@pytest.mark.skip(reason="COND_MARKET_ORDER not implemented")
 async def test_simple_order_with_cond_market_order_at_market_with_event():
     """ Test le passage d'un ordre simple, sur unit, avec condition market, sans trailing, validé par un event """
     conf = {
@@ -341,13 +368,17 @@ async def test_simple_order_with_cond_market_order_at_market_with_event():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == 0.1
@@ -360,7 +391,7 @@ async def test_positive_trailing_buy_order_from_market():
         "unit": 0.1,
         # "total": 20,
         "mode": "MARKET",
-        "training": "10.0%"
+        "trailing": "10.0%"
     }
     values = \
         [
@@ -422,17 +453,21 @@ async def test_positive_trailing_buy_order_from_market():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING_BUY
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.activate_trailing_buy
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
     assert smart_trade.buy_order.order['price'] == Decimal(901)
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.is_finished()
 
 
@@ -443,7 +478,7 @@ async def test_negative_trailing_buy_order_from_market():
         "unit": 0.1,
         # "total": 20,
         "mode": "MARKET",
-        "training": "-10.0%"
+        "trailing": "-10.0%"
     }
     values = \
         [
@@ -503,17 +538,21 @@ async def test_negative_trailing_buy_order_from_market():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING_BUY
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.activate_trailing_buy
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
     assert smart_trade.buy_order.order['price'] == Decimal(901)
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.is_finished()
 
 
@@ -529,7 +568,7 @@ async def test_simple_order_at_market_tp_last():
         "take_profit": {
             "base": "last",  # FIXME: last ou ask ?
             "mode": "MARKET",
-            "price": "1%",
+            "price": "2%",
         },
     }
     values = \
@@ -557,21 +596,29 @@ async def test_simple_order_at_market_tp_last():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TP_ALONE
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
-    await smart_trade.next()
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_TAKE_PROFIT_LIMIT
 
 
@@ -611,13 +658,17 @@ async def test_simple_order_at_market_tp_ask():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -639,12 +690,16 @@ async def test_simple_order_at_market_tp_ask():
             }
         }
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
-    await smart_trade.next()
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_MARKET
 
@@ -685,13 +740,17 @@ async def test_simple_order_at_market_tp_bid():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -713,12 +772,16 @@ async def test_simple_order_at_market_tp_bid():
             }
         }
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
-    await smart_trade.next()
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_MARKET
 
@@ -762,13 +825,17 @@ async def test_simple_order_at_market_tp_last_trailing_negatif():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -804,15 +871,19 @@ async def test_simple_order_at_market_tp_last_trailing_negatif():
             }
         },
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
-    await smart_trade.next()
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.active_take_profit_condition == Decimal(1020)
     assert smart_trade.active_take_profit_sell == Decimal(1089)
@@ -858,13 +929,17 @@ async def test_simple_order_at_market_tp_last_trailing_positif():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -900,15 +975,19 @@ async def test_simple_order_at_market_tp_last_trailing_positif():
             }
         },
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
-    await smart_trade.next()
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.active_take_profit_condition == Decimal("1030.2")
     assert smart_trade.active_take_profit_sell == Decimal("1089")
@@ -954,13 +1033,17 @@ async def test_simple_order_at_market_tp_last_limit_trailing_negatif():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -996,15 +1079,19 @@ async def test_simple_order_at_market_tp_last_limit_trailing_negatif():
             }
         },
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
-    await smart_trade.next()
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.active_take_profit_condition == Decimal(1020)
     assert smart_trade.active_take_profit_sell == Decimal(1089)
@@ -1050,13 +1137,17 @@ async def test_simple_order_at_market_tp_last_limit_trailing_positif():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -1092,15 +1183,19 @@ async def test_simple_order_at_market_tp_last_limit_trailing_positif():
             }
         },
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
-    await smart_trade.next()
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.active_take_profit_condition == Decimal("1030.20")
     assert smart_trade.active_take_profit_sell == Decimal(1020)
@@ -1146,21 +1241,29 @@ async def test_simple_order_at_market_sl_last():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_SL_ALONE
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_STOP_LOSS_LIMIT
 
 
@@ -1202,13 +1305,17 @@ async def test_simple_order_at_market_sl_ask():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -1239,16 +1346,21 @@ async def test_simple_order_at_market_sl_ask():
             }
         }
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_SL
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.active_stop_loss_condition == Decimal("990.0")
 
@@ -1291,13 +1403,17 @@ async def test_simple_order_at_market_sl_bid():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -1328,16 +1444,21 @@ async def test_simple_order_at_market_sl_bid():
             }
         }
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_SL
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.active_stop_loss_condition == Decimal("990.00")
 
@@ -1381,13 +1502,17 @@ async def test_simple_order_at_market_sl_last_trailing():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -1415,16 +1540,21 @@ async def test_simple_order_at_market_sl_last_trailing():
             }
         }
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_SL
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.active_stop_loss_condition == Decimal(1089)
 
@@ -1468,13 +1598,17 @@ async def test_simple_order_at_limit_sl_last_trailing():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -1502,16 +1636,21 @@ async def test_simple_order_at_limit_sl_last_trailing():
             }
         }
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_SL
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.active_stop_loss_condition == Decimal(1089)
 
@@ -1556,13 +1695,17 @@ async def test_simple_order_at_cond_limit_sl_last_trailing():
                                           client_account=client_account,
                                           conf=conf,
                                           )
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     client.get_socket_manager().add_multicast_events([
         {
@@ -1590,16 +1733,21 @@ async def test_simple_order_at_cond_limit_sl_last_trailing():
             }
         }
     ])
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_SL
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await smart_trade.next()
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # STATE_ADD_ORDER
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)  # FINISH
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.buy_order.order['quantity'] == 0.1
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_LIMIT
     assert smart_trade.active_stop_loss_condition == Decimal(1089)
 
