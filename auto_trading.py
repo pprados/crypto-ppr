@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import glob
 import logging
 import os
 import secrets
@@ -6,22 +7,23 @@ import sys
 import tracemalloc
 from asyncio import get_event_loop, sleep
 from decimal import getcontext, FloatOperation
-from http.client import HTTPException
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 import click as click
 import uvicorn
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from starlette import status
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 import global_flags
 from api_key import api_key, api_secret, test_net, USER, PASSWORD
 from engine import Engine
 from request_json_comments import JsonCommentRoute
+import jstyleson as json
 
 
 async def startup():
@@ -43,7 +45,7 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
     if not (correct_username and correct_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect authentification",
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
@@ -66,6 +68,20 @@ async def get_open_api_endpoint(_: str = Depends(get_current_username)):
 async def get_documentation(_: str = Depends(get_current_username)):
     return get_swagger_ui_html(openapi_url="/openapi.json", title="docs")
 
+
+@app.post("/reset/")
+async def reset(_: str = Depends(get_current_username)):
+    raise ValueError("Reset")
+
+@app.get("/template/")
+async def list_template(_: str = Depends(get_current_username)):
+    """ List des templates de bots """
+    return [ name[5:-10] for name in glob.glob('bots/*_conf.json')]
+
+@app.get("/template/{name}")
+async def get_template(name:str,_: str = Depends(get_current_username)):
+    with open(Path("bots",name+"_conf.json")) as f:
+        return Response(content=f.read(), media_type="application/text")
 
 @app.get("/bots/")
 async def list_bot_id(_: str = Depends(get_current_username)):
