@@ -298,6 +298,8 @@ class AddOrder(BotGenerator):
                 return
             elif self.state == AddOrder.STATE_CANCELING:
                 try:
+                    assert self.order['orderId']
+                    log.warning(f"Cancel order {self.order['clientOrderId']}")
                     await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])
                 except BinanceAPIException as ex:
                     if ex.code == -2011 and ex.message == "Unknown order sent.":

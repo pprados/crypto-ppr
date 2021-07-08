@@ -44,9 +44,11 @@ class SmartTrade(BotGenerator):
 
     STATE_TP_ALONE = "tp_alone"
     STATE_WAIT_TP_FILLED = "wait_tp_filled"
+    STATE_CHANGE_TP_TO_MARKET = "change_tp_to_market"
 
     STATE_SL_ALONE = "sl_alone"
     STATE_WAIT_SL_FILLED = "wait_sl_filled"
+    STATE_CHANGE_SL_TO_MARKET = "change_sl_to_market"
 
     STATE_ACTIVATE_TRAILING_SL = "active_sl_condition"
     STATE_SL_TIMEOUT = "active_sl_timeout"
@@ -559,11 +561,44 @@ class SmartTrade(BotGenerator):
                     yield self
 
                 elif self.state == SmartTrade.STATE_WAIT_TP_FILLED:
+                    if params.take_profit_sell_timeout and 'take_profit_order_timeout' not in self:
+                        self.take_profit_order_timeout = get_now() + params.take_profit_sell_timeout
                     await anext(self.take_profit_order)
                     if self.take_profit_order.is_error():
                         self._set_state_error()
                     elif self.take_profit_order.is_filled():
                         self.state = SmartTrade.STATE_FINISH
+                    if self.take_profit_order.order['type'] == ORDER_TYPE_LIMIT and \
+                            'take_profit_order_timeout' in self:
+                        if self.take_profit_order_timeout < get_now():
+                            log.warning("Timeout for sell with LIMIT")
+                            self.state = SmartTrade.STATE_CHANGE_TP_TO_MARKET
+                    yield self
+                elif self.state == SmartTrade.STATE_CHANGE_TP_TO_MARKET:
+                    # S'assure d'avoir valider l'ordre précédent
+                    while self.take_profit_order.state in (AddOrder.STATE_ADD_ORDER,AddOrder.STATE_ADD_ORDER_ACCEPTED):
+                        await anext(self.take_profit_order)
+                    self.take_profit_order.cancel()
+                    await anext(self.take_profit_order)
+                    origin_order = self.take_profit_order.order
+                    order = {
+                        "newClientOrderId": generate_order_id(generator_name),
+                        "symbol": origin_order["symbol"],
+                        "side": origin_order["side"],
+                        "type" : ORDER_TYPE_MARKET,
+                        "quantity":origin_order["quantity"],
+                    }
+                    self.take_profit_order = await AddOrder.create(
+                        client,
+                        event_queues,
+                        queue,
+                        log,
+                        order=order,
+                        wallet=self.wallet,
+                        continue_if_partially=False
+                    )
+                    log.warning("Re push order with MARKET price")
+                    self.state = SmartTrade.STATE_WAIT_TP_FILLED
                     yield self
 
 
@@ -618,11 +653,45 @@ class SmartTrade(BotGenerator):
                     yield self
 
                 elif self.state == SmartTrade.STATE_WAIT_SL_FILLED:
+                    if params.stop_loss_sell_timeout and 'stop_loss_order_timeout' not in self:
+                        self.stop_loss_order_timeout = get_now() + params.stop_loss_sell_timeout
                     await anext(self.stop_loss_order)
                     if self.stop_loss_order.is_error():
                         self._set_state_error()
                     elif self.stop_loss_order.is_filled():
                         self.state = SmartTrade.STATE_FINISH  # TODO: autres erreurs
+                    if self.stop_loss_order.order['type'] == ORDER_TYPE_LIMIT and \
+                            'stop_loss_order_timeout' in self:
+                        if self.stop_loss_order_timeout < get_now():
+                            log.warning("Timeout for sell with LIMIT")
+                            self.state = SmartTrade.STATE_CHANGE_SL_TO_MARKET
+                    yield self
+
+                elif self.state == SmartTrade.STATE_CHANGE_SL_TO_MARKET:
+                    # S'assure d'avoir valider l'ordre précédent
+                    while self.stop_loss_order.state in (AddOrder.STATE_ADD_ORDER,AddOrder.STATE_ADD_ORDER_ACCEPTED):
+                        await anext(self.stop_loss_order)
+                    self.stop_loss_order.cancel()
+                    await anext(self.stop_loss_order)
+                    origin_order = self.stop_loss_order.order
+                    order = {
+                        "newClientOrderId": generate_order_id(generator_name),
+                        "symbol": origin_order["symbol"],
+                        "side": origin_order["side"],
+                        "type" : ORDER_TYPE_MARKET,
+                        "quantity":origin_order["quantity"],
+                    }
+                    self.stop_loss_order = await AddOrder.create(
+                        client,
+                        event_queues,
+                        queue,
+                        log,
+                        order=order,
+                        wallet=self.wallet,
+                        continue_if_partially=False
+                    )
+                    log.warning("Re push order with MARKET price")
+                    self.state = SmartTrade.STATE_WAIT_SL_FILLED
                     yield self
 
 

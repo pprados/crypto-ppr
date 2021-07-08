@@ -792,6 +792,109 @@ async def test_simple_order_at_market_tp_ask_limit():
     assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_LIMIT
 
 
+async def test_simple_order_at_market_tp_ask_limit_timeout():
+    """ Test le passage d'un ordre simple, avec TP simple sur ask, en mode limit """
+    # Dont générer un order TP
+    conf = {
+        "symbol": "BTCUSDT",
+        "unit": 0.1,
+        "mode": "MARKET",
+        "take_profit": {
+            "base": "ask",
+            "mode": "MARKET",
+            "price": "1%",
+            "mode_sell": "LIMIT",
+            "sell_timeout": 2,
+        },
+    }
+    values = \
+        [
+            Decimal(0),  # Init
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1000),  # STATE_ADD_ORDER, create_order()
+            Decimal(1000),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+            Decimal(1100),  # Take profit
+            Decimal(1000),  #
+            Decimal(1000),  #
+        ]
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          event_queues,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_TRAILING
+    client.get_socket_manager().add_multicast_events([
+        {
+            "stream": "btcusdt@bookTicker",
+            "data": {
+                "e": "trade",
+                "s": "BTCUSDT",
+                "b": "900",
+                "a": "1000"  # 3. Pas encore
+            }
+        },
+        {
+            "stream": "btcusdt@bookTicker",
+            "data": {
+                "e": "trade",
+                "s": "BTCUSDT",
+                "b": "900",
+                "a": "1010"  # 4. C'est le moment de lancer le TP
+            }
+        }
+    ])
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_TRAILING
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
+    await anext(smart_trade)
+    assert smart_trade.take_profit_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.take_profit_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.take_profit_order.state == AddOrder.STATE_INIT  # Reprend l'ordre en MARKET
+    await anext(smart_trade)
+    assert smart_trade.take_profit_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.take_profit_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.take_profit_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.take_profit_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.take_profit_order.state == AddOrder.STATE_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
+    assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_MARKET
+    assert smart_trade.active_take_profit_condition == Decimal("1010")
+
+
 async def test_simple_order_at_market_tp_bid():
     """ Test le passage d'un ordre simple, avec TP simple sur ask """
     # Dont générer un order TP
@@ -1952,6 +2055,7 @@ async def test_simple_order_at_market_sl_ask_limit():
             Decimal(1000),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
             Decimal(900),  # Stop loss
             Decimal(1000),  #
+            Decimal(1000),  #
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
@@ -2030,6 +2134,122 @@ async def test_simple_order_at_market_sl_ask_limit():
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_LIMIT
+    assert smart_trade.active_stop_loss_condition == Decimal("990.0")
+
+
+async def test_simple_order_at_market_sl_ask_limit_timeout():
+    """ Test le passage d'un ordre simple, avec SL simple sur ask """
+    # Dont générer un order TP
+    conf = {
+        "symbol": "BTCUSDT",
+        "unit": 0.1,
+        "mode": "MARKET",
+        "stop_loss": {
+            "base": "ask",
+            "mode": "MARKET",
+            "price": "-1%",
+            "mode_sell": "LIMIT",
+            "sell_timeout": 2,
+        },
+    }
+    values = \
+        [
+            Decimal(0),  # Init
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1000),  # STATE_ADD_ORDER, create_order()
+            Decimal(1000),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+            Decimal(900),  # Stop loss
+            Decimal(1000),  #
+            Decimal(1000),  #
+        ]
+
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          event_queues,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_TRAILING
+    client.get_socket_manager().add_multicast_events([
+        {
+            "stream": "btcusdt@bookTicker",
+            "data": {
+                "e": "trade",
+                "s": "BTCUSDT",
+                "b": "900",
+                "a": "1000"  # 3. Pas encore
+            }
+        },
+        {
+            "stream": "btcusdt@bookTicker",
+            "data": {
+                "e": "trade",
+                "s": "BTCUSDT",
+                "b": "900",
+                "a": "1100"  # Ajuste
+            }
+        },
+        {
+            "stream": "btcusdt@bookTicker",
+            "data": {
+                "e": "trade",
+                "s": "BTCUSDT",
+                "b": "900",
+                "a": "990"  # 4. C'est le moment de lancer le SL
+            }
+        }
+    ])
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_TRAILING
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_TRAILING
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_SL
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT  # Reprend l'ordre en MARKET
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
+    assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.active_stop_loss_condition == Decimal("990.0")
 
 

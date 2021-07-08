@@ -30,7 +30,8 @@
     "base": "last",     // La base de déclanchement : *bid*, ask, last (securisé via pre-ordre)
     "mode": "MARKET",   // "MARKET" ou "LIMIT"
 
-    "mode_sell": "LIMIT", // Lorsque vend pour un TP, ordre au MARKET ou limit sur le trigger ?
+    "mode_sell": "LIMIT", // *"MARKET"* ou "LIMIT". Lorsque vend pour un TP, ordre au MARKET ou limit sur le trigger ?
+    "sell_timeout": 5,  // Délais accordé pour un ordre limite, sinon, repasse en MARKET
 
     // La cible du profit en valeur ou % (TODO: negatif ?)
     // 100.0: déclenche à 100.0 quote
@@ -47,7 +48,7 @@
     // cela peut etre compensé par une durée plus longue, pour s'assurer de la montée
     "trailing_minimal": false,
 
-    "timeout": 2,  // En seconde, combien de temps la hausse doit être valide
+    "timeout": 2,  // En seconde, combien de temps la hausse doit être valide pour le trailing minimal
   },
 
   // Il est possible d'indiquer simultanément des règles de stop loss.
@@ -59,7 +60,8 @@
     // "COND_LIMIT_ORDER" : attend une condition pour vendre à la limite
     "mode": "MARKET",
 
-    "mode_sell": "LIMIT", // Lorsque vend pour un SL, ordre au MARKET ou limit sur le trigger ?
+    "mode_sell": "LIMIT", // *"MARKET"* ou "LIMIT". Lorsque vend pour un SL, ordre au MARKET ou limit sur le trigger ?
+    "sell_timeout": 5,  // Délais accordé pour un ordre limite, sinon, repasse en MARKET
 
     // Le declenchement du prix en valeur ou %
     // 100.0: vend à 100.0
