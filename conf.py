@@ -3,10 +3,10 @@ import os
 
 # TODO: voir https://www.starlette.io/config/
 # Debug flag
-NO_SAVE:bool = os.environ.get("NO_SAVE", "false").lower() == "true"
-EMPTY_PENDING:bool = os.environ.get("EMPTY_PENDING", "false").lower() == "true"
+NO_SAVE:bool = os.environ.get("NO_SAVE", "false").lower().strip() == "true"
+EMPTY_PENDING:bool = os.environ.get("EMPTY_PENDING", "false").lower().strip() == "true"
 # Active une production d'exception aléatoire, obligeant à reprendre depuis le début
-CHECK_RESILIENCE: int = int(os.environ.get("CHECK_RESILIENCE", "0"))
+CHECK_RESILIENCE: int = int(os.environ.get("CHECK_RESILIENCE", "0").strip())
 
 MIN_RECONNECT_WAIT = 10 if not CHECK_RESILIENCE else 0
 

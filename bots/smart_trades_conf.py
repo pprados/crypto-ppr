@@ -89,8 +89,9 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
 
         params.minimal = Decimal(take_profit_conf['minimal'].strip('%')) / 100 \
             if 'minimal' in take_profit_conf else None
+        assert not params.minimal or params.minimal > 0
         if params.minimal:
-            params.minimal_timeout = Decimal(take_profit_conf['minimal_timeout'])
+            params.minimal_timeout = take_profit_conf['timeout']
 
     # STOP LOST
     params.use_stop_loss = "stop_loss" in conf
@@ -113,7 +114,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
         params.stop_loss_order_price = Decimal(
             str(stop_loss_conf["order_price"])) if "order_price" in stop_loss_conf else None
         assert not params.stop_loss_order_price or params.stop_loss_mode == COND_LIMIT_ORDER
-        params.stop_loss_timeout = stop_loss_conf.get("timeout", 0) * 1000
+        params.stop_loss_timeout = stop_loss_conf.get("timeout", 0)
         params.stop_loss_trailing = stop_loss_conf.get("trailing")
         if params.use_take_profit and params.take_profit_trailing < 0 and params.take_profit_limit_percent:
             assert -params.take_profit_trailing < params.take_profit_limit_percent

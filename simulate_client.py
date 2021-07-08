@@ -32,11 +32,11 @@ class EndOfDatas(Exception):
 
 
 def to_str_date(timestamp: int) -> str:
-    return datetime.utcfromtimestamp(timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.utcfromtimestamp(timestamp/1000).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def to_datetime(binance_datetime: str):
-    return datetime.fromtimestamp(int(binance_datetime) / 1000)
+    return datetime.fromtimestamp(int(binance_datetime))
 
 
 class AbstractSimulateValue(TypingClient):

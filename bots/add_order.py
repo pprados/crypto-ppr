@@ -143,9 +143,9 @@ class AddOrder(BotGenerator):
                 await client.create_test_order(**self.order)
                 # Puis essaye de l'executer
                 try:
-                    log.info(f"--------- Push order {self.order}")
+                    log.info(f"--- Push order {self.order}")
                     self.new_order = await client.create_order(**self.order)
-                    log.info(f"--------- Order pushed {self.new_order}")
+                    log.info(f"--- Order pushed {self.new_order}")
                 except BinanceAPIException as ex:
                     if ex.code == -2010:  # Duplicate order sent ?, ignore
                         if ex.message == "Duplicate order sent.":

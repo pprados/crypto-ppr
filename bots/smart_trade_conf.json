@@ -39,9 +39,9 @@
     // "-3%": déclenche à la cible, et vend si descend à la cible-3%
     "trailing": "-0.05%",
 
-    // Take profit minimum, si le cours remonte pendant 'minimal_timeout', alors le SL est à ce niveau
+    // Take profit minimum, si le cours remonte pendant 'timeout', alors le SL est à ce niveau
     "minimal" : "0.01%",
-    "minimal_timeout": 2,
+    "timeout": 2,  // En seconde
   },
 
   // Il est possible d'indiquer simultanément des règles de stop loss.

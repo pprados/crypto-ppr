@@ -5,6 +5,7 @@ import asyncio
 import logging
 from asyncio import Queue
 from pathlib import Path
+from typing import Tuple, List
 
 import aiohttp
 from aiohttp import ClientConnectorError
@@ -21,10 +22,10 @@ from conf import EMPTY_PENDING
 from events_queues import EventQueues
 from shared_time import sleep_speed, get_now
 from simulate_client import EndOfDatas, to_str_date
-from .smart_trades_conf import *
 from tools import split_symbol, generate_order_id, \
-    update_order, log_wallet, anext, wallet_from_symbol, benefice
+    update_order, log_wallet, anext, wallet_from_symbol, benefice, alias_symbol
 from .add_order import AddOrder
+from .smart_trades_conf import *
 
 
 # Utilisation d'un generateur pour pouvoir utiliser la stratégie
@@ -61,7 +62,25 @@ class SmartTrade(BotGenerator):
     STATE_CANCELING = "canceling"
     STATE_CANCELED = "canceled"
 
-    # TODO: cancel
+    # TODO: cancel et autres events users
+
+    def status(self) -> List[Tuple[str, Decimal, str]]:
+        # FIXME: ajouter dans les TU
+        stat = []
+        stat.append(("SL", self.active_stop_loss_condition, ""))
+        if self.params.take_profit_trailing:
+            stat.append(("TTP", self.active_take_profit_trailing, "Trailing TP"))
+            stat.append(("STP", self.active_take_profit_sell, "Trailing Sell TP"))
+        else:
+            stat.append(("TP", self.active_take_profit_condition, "TP"))
+
+        if self.params.minimal and 'activate_min_tp' in self:
+            stat.append(("MTP", self.activate_min_tp, "TP"))
+
+        if self.buy_order:
+            stat.append(("Buy", self.buy_order.price, "BUY"))
+
+        pass  # TODO
 
     async def generator(self,
                         client: AsyncClient,
@@ -91,7 +110,7 @@ class SmartTrade(BotGenerator):
                     self.activate_trailing_buy = True
                 if self.activate_trailing_buy:
                     if trade_price > self.buy_condition:
-                        log.info(f"Price goes up. Buy at market (~{trade_price} {quote})")
+                        log.info(f"Price goes up. Buy at market (~{trade_price} {squote})")
                         self.state = SmartTrade.STATE_CREATE_BUY_ORDER  # TODO: market condition
                     else:
                         new_buy_condition = trade_price * (1 + self.trailing_buy)
@@ -146,12 +165,14 @@ class SmartTrade(BotGenerator):
                     trigger_price = Decimal(msg['b'])
                 elif params.take_profit_base == 'ask':
                     trigger_price = Decimal(msg['a'])
+                # if trigger_price:
+                #     log.info(f"@bookTicker {trigger_price=}")
             if msg["_stream"].endswith("@trade") and \
                     msg['e'] == "trade" and msg['s'] == params.symbol \
                     and params.take_profit_base == 'last':
                 trigger_price = Decimal(msg['p'])
+                # log.info(f"@trade {trigger_price=}")
             if trigger_price:
-                # log.info(f"{trigger_price=}")
                 if params.take_profit_trailing:
                     if not self.active_take_profit_trailing and trigger_price >= self.active_take_profit_condition:
                         log.info("Activate trailing TP...")
@@ -166,6 +187,11 @@ class SmartTrade(BotGenerator):
                             else:
                                 new_take_profit_sell = trigger_price * (1 + -params.take_profit_trailing)
                             if new_take_profit_sell > self.active_take_profit_sell:
+                                diff = new_take_profit_sell - self.active_take_profit_sell
+                                if 'min_tp_target' in self:
+                                    self.min_tp_target += diff
+                                    log.info(f"Update Min-TP condition to {self.min_tp_target} {squote}")
+
                                 self.active_take_profit_sell = new_take_profit_sell
                                 log.debug(f"Update take-profit condition = {self.active_take_profit_sell}"
                                           f"(+{(self.active_take_profit_sell / self.buy_order.price - 1) * 100}%)")
@@ -176,15 +202,27 @@ class SmartTrade(BotGenerator):
 
                 # Gestion du minimal TP
                 if params.minimal:
-                    if trigger_price >= self.min_tp_price:
+                    if self.min_tp_triggered:
+                        log.info(f"trigger_price={trigger_price}")
+                    if self.min_tp_triggered and trigger_price < self.min_tp_target:
+                        log.warning(
+                            f"****** Activate Min TP because the price {trigger_price} {squote} < {self.min_tp_target} {squote} ...")
+                        self.state = SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
+                        self.min_tp_activated = True
+                    elif trigger_price >= self.min_tp_target:
                         now = get_now()
                         if self.activate_min_tp:
-                            if self.activate_min_tp + params.minimal_timeout > now:
-                                log.warning("****** Activate Min TP...")
+                            if not self.min_tp_triggered and self.activate_min_tp + params.minimal_timeout < now:
+                                self.min_tp_triggered = True
+                                log.warning(
+                                    f"Min-TP triggered, upper to {self.min_tp_target} {squote} for {params.minimal_timeout}s")
                         else:
                             self.activate_min_tp = now
-                            log.info(f"Min-TP start timer... {to_str_date(self.activate_min_tp)}")
+                            log.debug(f"Min-TP start timer... {to_str_date(self.activate_min_tp)}")
                     else:
+                        if self.min_tp_activated:
+                            log.debug(f"Stop Min-TP timer")
+                        self.min_tp_activated = False
                         self.activate_min_tp = None
 
         try:
@@ -214,6 +252,7 @@ class SmartTrade(BotGenerator):
 
             # Récupération des paramètres
             params = parse_conf(conf)
+            self.params = params
 
             if EMPTY_PENDING:
                 # Clean all orders for this symbol
@@ -232,6 +271,8 @@ class SmartTrade(BotGenerator):
 
             # Récupération des balances du wallet master
             base, quote = split_symbol(params.symbol)
+            sbase = alias_symbol(base)
+            squote = alias_symbol(quote)
             self.wallet = wallet_from_symbol(client_account, params.symbol)
             self.initial_wallet = self.wallet.copy()
 
@@ -304,7 +345,7 @@ class SmartTrade(BotGenerator):
 
                             self.buy_condition = price * (1 + self.trailing_buy)
                             self.activate_trailing_buy = True
-                        log.info(f"Activate trailing buy at {self.buy_condition} {quote}")
+                        log.info(f"Activate trailing buy at {self.buy_condition} {squote}")
                         self.state = SmartTrade.STATE_TRAILING_BUY
                     else:
                         self.state = SmartTrade.STATE_CREATE_BUY_ORDER
@@ -402,14 +443,24 @@ class SmartTrade(BotGenerator):
                                 # SL avec trailing. Ne peux pas utiliser un ordre SL.
                                 if params.stop_loss_trailing:
                                     log.info(
-                                        f"Set trailing stop-loss condition at {self.active_stop_loss_condition} ({params.stop_loss_base})")
+                                        f"Set trailing stop-loss condition at {self.active_stop_loss_condition} ({percent * 100}%) ({params.stop_loss_base})")
                                 else:
                                     log.info(
                                         f"Set stop-loss condition at {self.active_stop_loss_condition} ({params.stop_loss_base})")
                                 self.state = SmartTrade.STATE_TRAILING
 
                         if params.use_take_profit:
+                            if params.minimal:
+                                self.min_tp_target = self.buy_order.price * (1 + params.minimal)
+                                self.min_tp_triggered = False
+                                self.min_tp_activated = False
+                                self.activate_min_tp = None
+                                log.info(
+                                    f"Set Min-Take-Profit trigger condition at "
+                                    f"{self.min_tp_target} {squote} (+{params.minimal * 100}%)"
+                                    f" ({params.take_profit_base})")
                             if not params.take_profit_trailing \
+                                    and not params.minimal \
                                     and not params.use_stop_loss \
                                     and params.take_profit_base == "last":  # TODO: si params.take_profit_base != "last", à la bots_engine
                                 # TP sans SL ni trailing, sur une base 'last'
@@ -423,12 +474,6 @@ class SmartTrade(BotGenerator):
                                 self.take_profit_percent = percent
                                 tp_price = self.buy_order.price * (1 + percent)
 
-                                if params.minimal:
-                                    self.min_tp_price = self.buy_order.price * (1 + params.minimal)
-                                    log.info(
-                                        f"Set minimal take-profit condition at "
-                                        f"{self.min_tp_price} {quote}")
-
                                 if params.take_profit_trailing:
                                     if params.take_profit_trailing < 0:
                                         self.active_take_profit_condition = tp_price
@@ -441,19 +486,21 @@ class SmartTrade(BotGenerator):
                                     assert self.active_take_profit_sell < self.active_take_profit_condition
                                     assert tp_sell_condition > 0
                                     log.info(
-                                        f"Set take-profit condition at "
-                                        f"{self.active_take_profit_condition} (+{percent * 100}%)"
+                                        f"Set Take-Profit trigger condition at "
+                                        f"{self.active_take_profit_condition} {squote}"
+                                        f" (+{((self.active_take_profit_condition / self.buy_order.price)-1) * 100}%)"
                                         f" ({params.take_profit_base})")
                                     log.info(
-                                        f"Sell condition at {self.active_take_profit_sell} ("
-                                        f"+{tp_sell_condition}%)")
+                                        f"Set Take-Profit sell condition at {self.active_take_profit_sell} {squote}"
+                                        f" (+{tp_sell_condition}%)")
                                 else:
                                     self.active_take_profit_condition = tp_price
-                                    log.info(f"Set take profit at {self.active_take_profit_condition} ("
-                                             f"+{(self.active_take_profit_condition / self.buy_order.price - 1) * 100}%)")
+                                    log.info(f"Set take profit trigger condition at {self.active_take_profit_condition} {squote}"
+                                             f" (+{(self.active_take_profit_condition / self.buy_order.price - 1) * 100}%)")
 
                                 self.active_take_profit_trailing = False
                                 self.state = SmartTrade.STATE_TRAILING
+
                         yield self
 
                 # ---------- Gestion d'un ordre TP seul
@@ -583,8 +630,7 @@ class SmartTrade(BotGenerator):
                     # In second place, priority of stop loss ?
                     if params.use_stop_loss:
                         await sl_trailing(msg)
-                    if s != self.state:
-                        yield self
+                    yield self
                 elif self.state == SmartTrade.STATE_SL:
                     # Add trade to stop loss
                     # TODO: ajouter un order plus tot ?

@@ -233,6 +233,7 @@ CTRL-D
 rsync -av -e ssh --exclude='venv' * pi@192.168.0.71:/opt/auto_trading
 rcp .env pi@192.168.0.71:/opt/auto_trading
   
+# Instalation des dépendences
 ssh pi@192.168.0.71
 cd /opt/auto_trading
 python3 -m venv venv
