@@ -145,10 +145,10 @@ class AddOrder(BotGenerator):
                 # Pas de doublon, ou détection impossible
                 self.state = AddOrder.STATE_ADD_ORDER
             elif self.state == AddOrder.STATE_ADD_ORDER:
-                # Prépare la création d'un ordre
-                await client.create_test_order(**self.order)
-                # Puis essaye de l'executer
                 try:
+                    # Prépare la création d'un ordre
+                    await client.create_test_order(**self.order)
+                    # Puis essaye de l'executer
                     log.info(f"--- Push order {self.order}")
                     self.new_order = await client.create_order(**self.order)
                     log.info(f"--- Order pushed {self.new_order}")

@@ -724,7 +724,7 @@ class SmartTrade(BotGenerator):
                     else:
                         if params.stop_loss_mode_sell == ORDER_TYPE_LIMIT:
                             order["type"] = ORDER_TYPE_LIMIT
-                            order["price"] = self.stop_loss_trigger_price
+                            order["price"] = self.stop_loss_trigger_price * (1+params.stop_loss_mode_sell_percent)
                             order["timeInForce"] = TIME_IN_FORCE_GTC
                         else:
                             order["type"] = ORDER_TYPE_MARKET
@@ -758,7 +758,7 @@ class SmartTrade(BotGenerator):
                             "symbol": params.symbol,
                             "side": SIDE_SELL,
                             "type": ORDER_TYPE_LIMIT,
-                            "price": self.take_profit_trigger_price,
+                            "price": self.take_profit_trigger_price * (1+params.take_profit_mode_sell_percent),
                             "timeInForce": TIME_IN_FORCE_GTC,
                             "quantity": self.buy_order.quantity
                         }

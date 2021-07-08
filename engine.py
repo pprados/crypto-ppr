@@ -253,7 +253,8 @@ class Engine:
                                                           # Ajout éventuellement de nouveaux bots
                                                           return_when=FIRST_COMPLETED)
                         for task in finished:
-                            task.result()  # Raise exception if error
+                            # del self.event_queues[task]
+                            task.result()  # Raise exception if error TODO: purge queue
                         assert unfinished is not None
                         self.bots = unfinished
                     else:
@@ -285,7 +286,7 @@ class Engine:
             except Exception as ex:
                 log.exception(ex)
                 raise
-            # TODO
+
             finally:
                 if self.bots:
                     for b in self.bots:

@@ -177,7 +177,7 @@ def _adjuste_price(current_price: Optional[Decimal], price: Decimal, wsi: Dict[s
             price = min_price
         if price > max_price:
             price = max_price
-    return price
+    return price.normalize()
 
 
 def update_market_lot_size(wsi: Dict[str, Any], quantity: Decimal) -> Decimal:

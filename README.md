@@ -246,7 +246,7 @@ ssh pi@192.168.0.71 "cd /usr/src/app && \
   python3 auto_trading.py"
 
 ## En faire un service
-ssh -p 8072 pi@88.124.108.99 "sudo ln -s /usr/src/app/auto_trading.service /etc/systemd/system && \
+ssh -p 8072 pi@XXX "sudo ln -s /usr/src/app/auto_trading.service /etc/systemd/system && \
 sudo systemctl daemon-reload && \
 sudo systemctl status  auto_trading"
 
