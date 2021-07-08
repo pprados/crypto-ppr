@@ -49,18 +49,18 @@ def _parse_order(order: Dict[str, Any]) -> Tuple[str, str, Decimal, Decimal]:
     quote_order_qty = None
     price = None
     if 'price' in order:
-        price = Decimal(order['price'])
+        price = Decimal(str(order['price']))
     if 'fills' in order:
         # TODO [{'price': '2543.14000000', 'qty': '0.03932000', 'commission': '0.00000000', 'commissionAsset': 'ETH', 'tradeId': 1135}]
         fills = order['fills']
         if fills:
-            price = Decimal(fills[0]['price'])  # FIXME
+            price = Decimal(str(fills[0]['price']))  # FIXME
     if 'executedQty' in order:
-        quantity = Decimal(order['executedQty'])
+        quantity = Decimal(str(order['executedQty']))
     if 'quantity' in order:
-        quantity = Decimal(order['quantity'])
+        quantity = Decimal(str(order['quantity']))
     if 'quoteOrderQty' in order:
-        quote_order_qty = Decimal(order['quoteOrderQty'])
+        quote_order_qty = Decimal(str(order['quoteOrderQty']))
     return side, base, quote, quantity, quote_order_qty, price
 
 

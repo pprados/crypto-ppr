@@ -38,6 +38,7 @@ class Engine:
                  api_secret: str,
                  test_net: bool,
                  simulate: bool,
+                 path:Optional[Path]=None,
                  ):
         self.api_key = api_key
         self.api_secret = api_secret
@@ -48,7 +49,7 @@ class Engine:
         self.dict_engine_conf = {}
 
         self.log = logging.getLogger(__name__)
-        self.path_conf = Path("ctx/engine.json")
+        self.path_conf = path if path else Path("ctx/engine.orig.json")
 
         self.engine_conf, rollback = atomic_load_json(self.path_conf)
         if rollback:
@@ -174,13 +175,15 @@ class Engine:
     def _resume(id: str, bot_conf: Dict[str, Any]):
         bot = bot_conf[next(iter(bot_conf))]
         state = atomic_load_json(Path("ctx", id + ".json"))[0]
-        return {"id": id,
-                "bot": bot['bot'],
-                "state": state['state'],
-                "bot_start": int(state['bot_start']),
-                "bot_stop": int(state['bot_stop']) if state['bot_stop'] else None
-                }
-
+        if state:
+            return {"id": id,
+                    "bot": bot['bot'],
+                    "state": state['state'],
+                    "bot_start": int(state['bot_start']),
+                    "bot_stop": int(state['bot_stop']) if state['bot_stop'] else None
+                    }
+        else:
+            return {}
     async def list_bot_id(self):
         return [Engine._resume(k, self.dict_engine_conf[k]) for k in self.dict_engine_conf.keys()]
 

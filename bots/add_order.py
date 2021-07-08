@@ -27,6 +27,7 @@ from atomic_json import atomic_load_json, atomic_save_json
 from bot_generator import BotGenerator
 from conf import STREAM_MSG_TIMEOUT, CHECK_RESILIENCE
 from events_queues import EventQueues
+from shared_time import get_now
 from simulate_client import EndOfDatas
 from tools import log_order, update_wallet, get_order_price, log_add_order, anext, log_wallet, generate_order_id, \
     wallet_from_symbol
@@ -89,7 +90,12 @@ class AddOrder(BotGenerator):
                         init: Dict[str, str],
                         **kwargs):
         if not init:
+            now = get_now()
             init = {
+                "bot_start": now,
+                "bot_last_update": now,
+                "bot_stop": None,
+                "running": True,
                 "state": AddOrder.STATE_INIT,
                 "order": kwargs['order'],
                 "newClientOrderId": kwargs['order'].get("newClientOrderId",generate_order_id("AddOrder"))
@@ -288,6 +294,7 @@ class AddOrder(BotGenerator):
                 self.state = AddOrder.STATE_FINISHED
                 yield self
             elif self.state == AddOrder.STATE_FINISHED:
+                self.running=False
                 return
             elif self.state == AddOrder.STATE_CANCELING:
                 try:
@@ -301,6 +308,7 @@ class AddOrder(BotGenerator):
                 self.state = AddOrder.STATE_CANCELED
                 yield self
             elif self.state == AddOrder.STATE_CANCELED:
+                self.running=False
                 return
             else:
                 log.error(f'Unknown state \'{self["state"]}\'')

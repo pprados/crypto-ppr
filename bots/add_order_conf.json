@@ -1,11 +1,21 @@
 // Bot permettant de passer des ordres "résiliant"
 {
   "bot": "add_order",
-  "comment": "Injection sans fin de ST",
+  "comment": "Ordre simple jusqu'a l'activation",
+  // Voir: https://binance-docs.github.io/apidocs/spot/en/#new-order-trade
   "order": {
     "symbol": "BTCUSDT",
+
+    // "BUY", "SELL"
     "side": "BUY",
+
+    // Type: MARKET, LIMIT, STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT, TAKE_PROFIT_LIMIT
     "type": "MARKET",
+
+    // "price": 1000,         // Sauf pour Market
+    //"timeInForce": "GTC",   // Sauf pour Market
+
+    // "quantity": 10 // ou "quoteOrderQty": 20
     "quoteOrderQty": 20
   }
 }

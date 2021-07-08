@@ -17,9 +17,9 @@ from bot_generator import BotGenerator
 from events_queues import EventQueues
 from shared_time import sleep_speed, get_now
 from simulate_client import EndOfDatas
-from smart_trades_conf import *
 from tools import log_wallet, anext, split_symbol, wallet_from_symbol
 from .smart_trade import SmartTrade
+from .smart_trades_conf import *
 
 
 # Utilisation d'un generateur pour pouvoir utiliser la stratégie

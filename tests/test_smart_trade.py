@@ -1382,6 +1382,7 @@ async def test_simple_order_trailing_min_tp_activate():
             "trailing": "-0.05%",
             "minimal": "0.5%",
             "timeout": 1,
+            "trailing_minimal": True,
         }
     }
     values = \

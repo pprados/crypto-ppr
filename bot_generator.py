@@ -5,15 +5,14 @@ from typing import Dict, Any
 
 from binance import AsyncClient
 
-
 # Classe abstract servant de base aux classes en charge d'un generator.
 # Une instance est compatible avec json. C'est un dictionnaire.
 # Il faut ajouter une méthode _start(...) qui doit créer un attribut _generator.
 from TypingClient import TypingClient
 from events_queues import EventQueues
 from shared_time import get_now
-from tools import Wallet, anext
-import inspect
+from tools import anext
+
 
 class BotGenerator(dict):
     STATE_FINISHED = "FINISHED"
@@ -23,10 +22,10 @@ class BotGenerator(dict):
     async def create(cls,
                      client: AsyncClient,
                      event_queues: EventQueues,
-                     queue:Queue,
+                     queue: Queue,
                      log: logging,
-                     init: Dict[str, Any]={},
-                     **kwargs:Dict[str,Any]) -> 'BotGenerator':
+                     init: Dict[str, Any] = {},
+                     **kwargs: Dict[str, Any]) -> 'BotGenerator':
         """
         Il n'est pas possible d'avoir un constructeur asynchrone,
         Donc on passe par une méthode 'create()'
@@ -49,7 +48,7 @@ class BotGenerator(dict):
                      queue: Queue,
                      log: logging,
                      init: Dict[str, str],
-                     kwargs: Dict[str,Any]) -> 'WinterSummerBot':
+                     kwargs: Dict[str, Any]) -> 'WinterSummerBot':
         """ Invoke le generateur pour initialiser le bot """
         self._generator = self.generator(client,
                                          event_queues,
@@ -92,14 +91,12 @@ class BotGenerator(dict):
     def is_finished(self):
         return self.state == BotGenerator.STATE_FINISHED
 
-
     def _set_state_error(self):
         self.state = BotGenerator.STATE_ERROR
-        self.bot_stop=get_now()
-        self.running=False
+        self.bot_stop = get_now()
+        self.running = False
 
     def _set_terminated(self):
         self.state = BotGenerator.STATE_FINISHED
-        self.bot_stop=get_now()
-        self.running=False
-
+        self.bot_stop = get_now()
+        self.running = False

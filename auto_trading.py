@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 import click as click
+import click_pathlib
 import uvicorn
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -23,7 +24,8 @@ import global_flags
 from api_key import api_key, api_secret, test_net, USER, PASSWORD
 from engine import Engine
 from request_json_comments import JsonCommentRoute
-import jstyleson as json
+
+engine_path: Path = None
 
 
 async def startup():
@@ -32,7 +34,7 @@ async def startup():
     # Creation de l'engine pour les bots. A garder dans une variable globale
     # pour que les threads associés restent en vie.
     global engine
-    engine = Engine(api_key, api_secret, test_net, global_flags.simulate)
+    engine = Engine(api_key, api_secret, test_net, global_flags.simulate, path=engine_path)
     await sleep(1)  # Wait the startup
 
 
@@ -73,15 +75,18 @@ async def get_documentation(_: str = Depends(get_current_username)):
 async def reset(_: str = Depends(get_current_username)):
     raise ValueError("Reset")
 
+
 @app.get("/template/")
 async def list_template(_: str = Depends(get_current_username)):
     """ List des templates de bots """
-    return [ name[5:-10] for name in glob.glob('bots/*_conf.json')]
+    return [name[5:-10] for name in glob.glob('bots/*_conf.json')]
+
 
 @app.get("/template/{name}")
-async def get_template(name:str,_: str = Depends(get_current_username)):
-    with open(Path("bots",name+"_conf.json")) as f:
+async def get_template(name: str, _: str = Depends(get_current_username)):
+    with open(Path("bots", name + "_conf.json")) as f:
         return Response(content=f.read(), media_type="application/text")
+
 
 @app.get("/bots/")
 async def list_bot_id(_: str = Depends(get_current_username)):
@@ -110,8 +115,10 @@ async def get_bot(id: str,
     return await engine.get_bot(id)
 
 
-def init(simulate: bool):
+def init(path: Optional[Path], simulate: bool):
+    global engine_path
     global_flags.simulate = simulate
+    engine_path = path
     ctx = getcontext()
     ctx.prec = 8
     ctx.traps[FloatOperation] = True
@@ -140,8 +147,13 @@ def init(simulate: bool):
 @click.option("--simulate",
               help='Simulate trading',
               is_flag=True)
-def main(simulate: bool):
-    init(simulate)
+@click.option("--path",
+              help='Engine path',
+              type=click_pathlib.Path()
+              )
+def main(simulate: bool,
+         path: Path):
+    init(path, simulate)
     # TODO: Voir http://www.uvicorn.org/#running-with-gunicorn
     # TODO: voir sync worker : https://docs.gunicorn.org/en/latest/design.html#sync-workers
     # pour simplifier le run

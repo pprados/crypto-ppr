@@ -41,7 +41,11 @@
 
     // Take profit minimum, si le cours remonte pendant 'timeout', alors le SL est à ce niveau
     "minimal" : "0.01%",
-    "timeout": 2,  // En seconde
+    // Suit le prix montant pour ajuster le Min-TP ? (Risque de vendre plus rapidement, avant d'arriver au TP
+    // cela peut etre compensé par une durée plus longue, pour s'assurer de la montée
+    "trailing_minimal": false,
+
+    "timeout": 2,  // En seconde, combien de temps la hausse doit être valide
   },
 
   // Il est possible d'indiquer simultanément des règles de stop loss.
@@ -76,7 +80,6 @@
 // TODO:
 // - Ajouter les Take profits multiple
 // - Gérer les "COND_LIMIT_ORDER", "COND_MARKET_ORDER"
-// - Ajouter un tp_limit avec timeout pour sécurer les gains à parti d'un niveau de TP
 // - Ajouter un calcul de la volatilité, pour activer ou non, automatiquement le trailing TP ou SL
 // - Ajouter les ordres "inverse", pour inverser les devices. Vendre avant d'acheter.
 //   C'est util pour la vente à découvert, ou pour traider BTC/ETH par exemple.

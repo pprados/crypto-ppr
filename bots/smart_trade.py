@@ -188,7 +188,7 @@ class SmartTrade(BotGenerator):
                                 new_take_profit_sell = trigger_price * (1 + -params.take_profit_trailing)
                             if new_take_profit_sell > self.active_take_profit_sell:
                                 diff = new_take_profit_sell - self.active_take_profit_sell
-                                if 'min_tp_target' in self:
+                                if params.minimal_trailing and 'min_tp_target' in self:
                                     self.min_tp_target += diff
                                     log.info(f"Update Min-TP condition to {self.min_tp_target} {squote}")
 
@@ -202,8 +202,8 @@ class SmartTrade(BotGenerator):
 
                 # Gestion du minimal TP
                 if params.minimal:
-                    if self.min_tp_triggered:
-                        log.info(f"trigger_price={trigger_price}")
+                    # if self.min_tp_triggered:
+                    #     log.info(f"trigger_price={trigger_price}")
                     if self.min_tp_triggered and trigger_price < self.min_tp_target:
                         log.warning(
                             f"****** Activate Min TP because the price {trigger_price} {squote} < {self.min_tp_target} {squote} ...")
@@ -691,6 +691,7 @@ class SmartTrade(BotGenerator):
                     self._set_terminated()
                     yield self
                 elif self.state == SmartTrade.STATE_FINISHED:
+                    self.running = False
                     return
                 # ---------------- Cancel and error
                 elif self.state == SmartTrade.STATE_CANCELING:
@@ -704,6 +705,7 @@ class SmartTrade(BotGenerator):
                     self.state = SmartTrade.STATE_CANCELED
                     yield self
                 elif self.state == SmartTrade.STATE_CANCELED:
+                    self.running = False
                     return
                 elif self.state == SmartTrade.STATE_ERROR:
                     self._set_state_error()

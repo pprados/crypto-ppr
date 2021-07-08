@@ -215,42 +215,43 @@ rpi-imager
 ssh -o PreferredAuthentications=password pi@192.168.0.71 
 passwd
   
-- Copie de clée ssh pour connection
+- Copie de clé ssh pour connection
 ssh-copy-id -i ~/.ssh/id_rsa.pub -o PreferredAuthentications=password pi@192.168.0.71
 ssh pi@192.168.0.71
 
-sudo raspi-config # mise à jour wifi, vnc, etc
-sudo apt full-upgrade  # Mise à jour OS
+sudo raspi-config       # mise à jour wifi, vnc, etc
+sudo apt full-upgrade   # Mise à jour OS
 sudo reboot
 
 sudo apt-get update
 sudo apt-get install libffi-dev
   
 - Copie des fichiers
-sudo mkdir /opt/auto_trading 
-sudo chown pi:pi /opt/auto_trading
+sudo mkdir /usr/src/app  # Idem que sous Docker 
+sudo chown pi:pi /usr/src/app
 CTRL-D  
-rsync -av -e ssh --exclude='venv' * pi@192.168.0.71:/opt/auto_trading
-rcp .env pi@192.168.0.71:/opt/auto_trading
+rsync -av -e ssh --exclude='venv' * pi@192.168.0.71:/usr/src/app
+rcp .env pi@192.168.0.71:/usr/src/app
   
 # Instalation des dépendences
-ssh pi@192.168.0.71
-cd /opt/auto_trading
-python3 -m venv venv
-source venv/bin/activate
-sudo apt-get install libatlas-base-dev
-pip3 install -r requirements.txt
+ssh pi@192.168.0.71 "cd /usr/src/app && \
+python3 -m venv venv && \
+source venv/bin/activate && \
+sudo apt-get install libatlas-base-dev && \
+pip3 install -r requirements.txt"
 
 - Vérifier le démarrage en local
-python3 auto_trading.py
+ssh pi@192.168.0.71 "cd /usr/src/app && \
+  source venv/bin/activate && \
+  python3 auto_trading.py"
 
 ## En faire un service
-ssh -p 8072 pi@88.124.108.99
-
-sudo ln -s /opt/auto_trading/auto_trading.service /etc/systemd/system
+ssh -p 8072 pi@88.124.108.99 "sudo ln -s /usr/src/app/auto_trading.service /etc/systemd/system && \
+sudo systemctl daemon-reload && \
+sudo systemctl status  auto_trading"
 
 - Vérifier que cela fonctionne
-systemctl daemon-reload
+ssh -p 8072 pi@88.124.108.99
 sudo systemctl start  auto_trading
 sudo systemctl status  auto_trading
 sudo journalctl --unit=auto_trading -f
