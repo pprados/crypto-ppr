@@ -70,6 +70,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
         take_profit_conf: Dict[str, Any] = conf["take_profit"]
         params.take_profit_mode = take_profit_conf["mode"]
         assert params.take_profit_mode in (MARKET, LIMIT, COND_MARKET_ORDER, COND_LIMIT_ORDER)
+        params.take_profit_mode_sell = take_profit_conf.get("mode_sell",MARKET)
 
         params.take_profit_base = take_profit_conf["base"]
         params.take_profit_limit_percent = None
@@ -100,6 +101,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
         stop_loss_conf: Dict[str, Any] = conf["stop_loss"]
         params.stop_loss_mode = stop_loss_conf.get("mode", "ask")  # "cond_limit", "market"
         assert params.stop_loss_mode in [MARKET, COND_LIMIT_ORDER]
+        params.stop_loss_mode_sell = stop_loss_conf.get("mode_sell",MARKET)
 
         params.stop_loss_base = stop_loss_conf["base"]
         l = stop_loss_conf.get("price")

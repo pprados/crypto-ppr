@@ -138,15 +138,18 @@ class SmartTrade(BotGenerator):
                             if self.active_stop_loss_timeout:
                                 if self.active_stop_loss_timeout + params.stop_loss_timeout > now:
                                     log.warning("****** Activate STOP-LOSS...")
+                                    self.stop_loss_trigger_price = trigger_price
                                     self.state = SmartTrade.STATE_SL
                             else:
                                 self.active_stop_loss_timeout = get_now()
                                 log.debug(f"Stop-loss start timer... {to_str_date(self.active_stop_loss_timeout)}")
                         else:
                             log.warning("****** Activate STOP-LOSS...")
+                            self.stop_loss_trigger_price = trigger_price
                             self.state = SmartTrade.STATE_SL
                     else:
                         log.warning("****** Activate STOP-LOSS (without trailing)...")
+                        self.stop_loss_trigger_price = trigger_price
                         self.state = SmartTrade.STATE_SL
                 elif params.stop_loss_trailing:
                     if self.active_stop_loss_timeout:
@@ -180,6 +183,7 @@ class SmartTrade(BotGenerator):
                     elif self.active_take_profit_trailing:
                         if trigger_price <= self.active_take_profit_sell:
                             log.info(f"Try to take-profit with ~{trigger_price}...")
+                            self.take_profit_trigger_price = trigger_price
                             self.state = SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
                         else:
                             if params.take_profit_trailing < 0:
@@ -198,6 +202,7 @@ class SmartTrade(BotGenerator):
                 elif trigger_price >= self.active_take_profit_condition:
                     # TP sans trailing
                     log.info(f"Try to take-profit with {trigger_price} (without trailing)...")
+                    self.take_profit_trigger_price = trigger_price
                     self.state = SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
 
                 # Gestion du minimal TP
@@ -207,6 +212,7 @@ class SmartTrade(BotGenerator):
                     if self.min_tp_triggered and trigger_price < self.min_tp_target:
                         log.warning(
                             f"****** Activate Min TP because the price {trigger_price} {squote} < {self.min_tp_target} {squote} ...")
+                        self.take_profit_trigger_price = trigger_price
                         self.state = SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
                         self.min_tp_activated = True
                     elif trigger_price >= self.min_tp_target:
@@ -488,15 +494,16 @@ class SmartTrade(BotGenerator):
                                     log.info(
                                         f"Set Take-Profit trigger condition at "
                                         f"{self.active_take_profit_condition} {squote}"
-                                        f" (+{((self.active_take_profit_condition / self.buy_order.price)-1) * 100}%)"
+                                        f" (+{((self.active_take_profit_condition / self.buy_order.price) - 1) * 100}%)"
                                         f" ({params.take_profit_base})")
                                     log.info(
                                         f"Set Take-Profit sell condition at {self.active_take_profit_sell} {squote}"
                                         f" (+{tp_sell_condition}%)")
                                 else:
                                     self.active_take_profit_condition = tp_price
-                                    log.info(f"Set take profit trigger condition at {self.active_take_profit_condition} {squote}"
-                                             f" (+{(self.active_take_profit_condition / self.buy_order.price - 1) * 100}%)")
+                                    log.info(
+                                        f"Set take profit trigger condition at {self.active_take_profit_condition} {squote}"
+                                        f" (+{(self.active_take_profit_condition / self.buy_order.price - 1) * 100}%)")
 
                                 self.active_take_profit_trailing = False
                                 self.state = SmartTrade.STATE_TRAILING
@@ -636,17 +643,22 @@ class SmartTrade(BotGenerator):
                     # TODO: ajouter un order plus tot ?
                     order = {
                         "newClientOrderId": generate_order_id(generator_name),
-                        "type": ORDER_TYPE_MARKET,
                         "symbol": params.symbol,
                         "side": SIDE_SELL,
                         "quantity": self.buy_order.quantity
                     }
+
                     if params.stop_loss_order_price:
                         order["type"] = ORDER_TYPE_LIMIT
                         order["timeInForce"] = TIME_IN_FORCE_GTC  # TODO: paramétrable ?
                         order["price"] = params.stop_loss_order_price
                     else:
-                        order["type"] = ORDER_TYPE_MARKET
+                        if params.stop_loss_mode_sell == ORDER_TYPE_LIMIT:
+                            order["type"] = ORDER_TYPE_LIMIT
+                            order["price"] = self.stop_loss_trigger_price
+                            order["timeInForce"] = TIME_IN_FORCE_GTC
+                        else:
+                            order["type"] = ORDER_TYPE_MARKET
                     order = update_order(symbol_info, None, order)
                     self.stop_loss_order = await AddOrder.create(
                         client,
@@ -663,13 +675,25 @@ class SmartTrade(BotGenerator):
 
                 elif self.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT:
                     # Take profit apres un trailing
-                    order = {
-                        "newClientOrderId": generate_order_id(generator_name),
-                        "symbol": params.symbol,
-                        "side": SIDE_SELL,
-                        "type": ORDER_TYPE_MARKET,
-                        "quantity": self.buy_order.quantity
-                    }
+                    if params.take_profit_mode_sell == MARKET:
+                        order = {
+                            "newClientOrderId": generate_order_id(generator_name),
+                            "symbol": params.symbol,
+                            "side": SIDE_SELL,
+                            "type": ORDER_TYPE_MARKET,
+                            "quantity": self.buy_order.quantity
+                        }
+                    else:
+                        order = {
+                            "newClientOrderId": generate_order_id(generator_name),
+                            "symbol": params.symbol,
+                            "side": SIDE_SELL,
+                            "type": ORDER_TYPE_LIMIT,
+                            "price": self.take_profit_trigger_price,
+                            "timeInForce": TIME_IN_FORCE_GTC,
+                            "quantity": self.buy_order.quantity
+                        }
+
                     order = update_order(symbol_info, None, order)
                     self.take_profit_order = await AddOrder.create(
                         client,

@@ -30,6 +30,8 @@
     "base": "last",     // La base de déclanchement : *bid*, ask, last (securisé via pre-ordre)
     "mode": "MARKET",   // "MARKET" ou "LIMIT"
 
+    "mode_sell": "LIMIT", // Lorsque vend pour un TP, ordre au MARKET ou limit sur le trigger ?
+
     // La cible du profit en valeur ou % (TODO: negatif ?)
     // 100.0: déclenche à 100.0 quote
     // "+3%": déclenche au prix d'achat+3% (doit etre positif)
@@ -56,6 +58,8 @@
     // "MARKET": vend au marché
     // "COND_LIMIT_ORDER" : attend une condition pour vendre à la limite
     "mode": "MARKET",
+
+    "mode_sell": "LIMIT", // Lorsque vend pour un SL, ordre au MARKET ou limit sur le trigger ?
 
     // Le declenchement du prix en valeur ou %
     // 100.0: vend à 100.0
