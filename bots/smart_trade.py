@@ -576,9 +576,7 @@ class SmartTrade(BotGenerator):
                     yield self
                 elif self.state == SmartTrade.STATE_CHANGE_TP_TO_MARKET:
                     # S'assure d'avoir valider l'ordre précédent
-                    while self.take_profit_order.state in (AddOrder.STATE_ADD_ORDER,AddOrder.STATE_ADD_ORDER_ACCEPTED):
-                        await anext(self.take_profit_order)
-                    self.take_profit_order.cancel()
+                    await self.take_profit_order.cancel()
                     await anext(self.take_profit_order)
                     origin_order = self.take_profit_order.order
                     order = {
@@ -669,9 +667,7 @@ class SmartTrade(BotGenerator):
 
                 elif self.state == SmartTrade.STATE_CHANGE_SL_TO_MARKET:
                     # S'assure d'avoir valider l'ordre précédent
-                    while self.stop_loss_order.state in (AddOrder.STATE_ADD_ORDER,AddOrder.STATE_ADD_ORDER_ACCEPTED):
-                        await anext(self.stop_loss_order)
-                    self.stop_loss_order.cancel()
+                    await self.stop_loss_order.cancel()
                     await anext(self.stop_loss_order)
                     origin_order = self.stop_loss_order.order
                     order = {
@@ -783,9 +779,6 @@ class SmartTrade(BotGenerator):
                     benefice(log, self.wallet, self.initial_wallet)
                     self._set_terminated()
                     yield self
-                elif self.state == SmartTrade.STATE_FINISHED:
-                    self.running = False
-                    return
                 # ---------------- Cancel and error
                 elif self.state == SmartTrade.STATE_CANCELING:
                     try:

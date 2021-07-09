@@ -75,7 +75,9 @@ class AddOrder(BotGenerator):
     def is_waiting(self):
         return self.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
 
-    def cancel(self):
+    async def cancel(self):
+        while self.state == AddOrder.STATE_ADD_ORDER_ACCEPTED:
+            await anext(self)
         self.previous_state = self.state
         self.state = AddOrder.STATE_CANCELING
 

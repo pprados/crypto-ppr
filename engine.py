@@ -127,11 +127,13 @@ class Engine:
 
         async_fun = getattr(module, fn)
         self.event_queues.add_queue(id)
-        self.bots.add(loop.create_task(async_fun(self.client,
+        task=loop.create_task(async_fun(self.client,
                                                  self.client_account,
                                                  id,
                                                  self.event_queues,
-                                                 conf)))
+                                                 conf))
+        task.set_name(id)
+        self.bots.add(task)
 
     async def create_bot(
             self,
@@ -253,8 +255,8 @@ class Engine:
                                                           # Ajout éventuellement de nouveaux bots
                                                           return_when=FIRST_COMPLETED)
                         for task in finished:
-                            # del self.event_queues[task]
-                            task.result()  # Raise exception if error TODO: purge queue
+                            del self.event_queues[task.get_name()]
+                            task.result()  # Raise exception if error
                         assert unfinished is not None
                         self.bots = unfinished
                     else:
