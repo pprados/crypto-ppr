@@ -26,10 +26,9 @@ from TypingClient import TypingClient
 from atomic_json import atomic_load_json, atomic_save_json
 from bot_generator import BotGenerator
 from conf import STREAM_MSG_TIMEOUT, CHECK_RESILIENCE
-from events_queues import EventQueues
 from shared_time import get_now
 from simulate_client import EndOfDatas
-from tools import log_order, update_wallet, get_order_price, log_add_order, anext, log_wallet, generate_order_id, \
+from tools import update_wallet, get_order_price, log_add_order, anext, log_wallet, generate_order_id, \
     wallet_from_symbol
 
 
@@ -65,7 +64,7 @@ class AddOrder(BotGenerator):
             return Decimal(self.order['quantity'])
 
     def is_filled(self, accept_partial=False):
-        return self.state == AddOrder.STATE_ORDER_FILLED or accept_partial \
+        return self.state in (AddOrder.STATE_ORDER_FILLED,AddOrder.STATE_FINISHED) or accept_partial \
                and self.state == AddOrder.STATE_ORDER_PARTIALLY_FILLED
 
     # FIXME
@@ -78,15 +77,19 @@ class AddOrder(BotGenerator):
     async def cancel(self):
         while self.state == AddOrder.STATE_ADD_ORDER_ACCEPTED:
             await anext(self)
-        self.previous_state = self.state
-        self.state = AddOrder.STATE_CANCELING
+        if self.state == AddOrder.STATE_ADD_ORDER:
+            self.previous_state = self.state
+            self.state = AddOrder.STATE_CANCELED
+        elif self.state not in (AddOrder.STATE_ORDER_FILLED,AddOrder.STATE_FINISHED,BotGenerator.STATE_FINISHED):
+            self.previous_state = self.state
+            self.state = AddOrder.STATE_CANCELING
 
     def is_canceled(self):
         return self.state == AddOrder.STATE_CANCELED
 
     async def generator(self,
                         client,
-                        event_queues: EventQueues,
+                        engine: 'Engine',
                         mixte_queue: Queue,
                         log: logging,
                         init: Dict[str, str],
@@ -143,7 +146,7 @@ class AddOrder(BotGenerator):
                         yield self
                         continue
                 else:
-                    log.warning("Impossible to detect a duplicate order. May be duplicate.")
+                    await engine.send_telegram(log,"Impossible to detect a duplicate order. May be duplicate.")
                 # Pas de doublon, ou détection impossible
                 self.state = AddOrder.STATE_ADD_ORDER
             elif self.state == AddOrder.STATE_ADD_ORDER:
@@ -154,6 +157,11 @@ class AddOrder(BotGenerator):
                     log.info(f"--- Push order {self.order}")
                     self.new_order = await client.create_order(**self.order)
                     log.info(f"--- Order pushed {self.new_order}")
+                    if self.new_order["status"] == ORDER_STATUS_FILLED:
+                        update_wallet(wallet, self.new_order)
+                        await engine.log_order(log, self.new_order, prefix + " ****** ")
+                        self.order=self.new_order
+                        self.state = AddOrder.STATE_ORDER_FILLED
                 except BinanceAPIException as ex:
                     if ex.code == -2010:  # Duplicate order sent ?, ignore
                         if ex.message == "Duplicate order sent.":
@@ -175,7 +183,7 @@ class AddOrder(BotGenerator):
                             # FIXME: rejouer ou adapter en market ?
                             # https://dev.binance.vision/t/order-would-trigger-immediately-error/245/2
                             log.error(f"{ex.message}")
-                            log_order(new_order)
+                            await engine.log_order(log, new_order)
                             self._set_state_error()
                             yield self
                             continue
@@ -184,7 +192,8 @@ class AddOrder(BotGenerator):
                             raise
                     else:
                         raise
-                self.state =AddOrder.STATE_ADD_ORDER_ACCEPTED
+                if self.new_order["status"] != ORDER_STATUS_FILLED:
+                    self.state =AddOrder.STATE_ADD_ORDER_ACCEPTED
                 yield self
 
             elif self.state == AddOrder.STATE_ADD_ORDER_ACCEPTED:
@@ -246,18 +255,18 @@ class AddOrder(BotGenerator):
                     # See https://binance-docs.github.io/apidocs/spot/en/#public-api-definitions
                     if new_order['status'] == ORDER_STATUS_FILLED:  # or ORDER_STATUS_IOY_FILLED
                         update_wallet(wallet, new_order)
-                        log_order(log, new_order, prefix + " ****** ")
+                        await engine.log_order(log, new_order, prefix + " ****** ")
                         del self._order
                         self.order = new_order
                         self.state = AddOrder.STATE_ORDER_FILLED
                         yield self
                     elif new_order['status'] == ORDER_STATUS_PARTIALLY_FILLED:  # or ORDER_STATUS_PARTIALLY_FILLED
                         # FIXME: Partially a traiter
-                        log_order(log, new_order)
+                        await engine.log_order(log, new_order)
                         update_wallet(wallet, new_order)
-                        log_order(log, new_order, prefix)
+                        await engine.log_order(log, new_order, prefix)
                         if not self.continue_if_partially:
-                            log.warning("PARTIALLY")
+                            await engine.send_telegram(log,"PARTIALLY")
                             del self._order
                             self.order = new_order
                             self.state = AddOrder.STATE_ORDER_FILLED
@@ -272,7 +281,7 @@ class AddOrder(BotGenerator):
                         self.state = AddOrder.STATE_ERROR
                         yield self
                     elif new_order['status'] == ORDER_STATUS_EXPIRED:
-                        log.warning(
+                        await engine.send_telegram(log,
                             f'Order {new_order["orderId"]} is expired ({new_order["clientOrderId"]}. Retry')  # FIXME
                         self.order = self._order
                         del self._order
@@ -286,7 +295,7 @@ class AddOrder(BotGenerator):
                         assert False, f"Unknown status {new_order['status']}"
                 except BinanceAPIException as ex:
                     if ex.code == -2013 and ex.message.startswith("Order does not exist."):
-                        log.warning("Order does not exist. Retry.")
+                        await engine.send_telegram(log,"Order does not exist. Retry.")
                         self.state = AddOrder.STATE_ADD_ORDER
                         yield self
                     else:
@@ -300,16 +309,22 @@ class AddOrder(BotGenerator):
                 return
             elif self.state == AddOrder.STATE_CANCELING:
                 try:
-                    assert self.order['orderId']
-                    log.warning(f"Cancel order {self.order['clientOrderId']}")
-                    await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])
+                    assert self.order['status']
+                    if self.order["status"] == ORDER_STATUS_NEW:
+                        assert self.order['orderId']
+                        await engine.send_telegram(log,f"Cancel order {self.order['clientOrderId']}")
+                        await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])
+                        self.state = AddOrder.STATE_CANCELED
+                    else:
+                        log.debug("Trop tard")
+                        self.state = AddOrder.STATE_ORDER_FILLED
                 except BinanceAPIException as ex:
                     if ex.code == -2011 and ex.message == "Unknown order sent.":
                         pass  # Ignore
+                        self.state = AddOrder.STATE_CANCELED
                     else:
                         raise
 
-                self.state = AddOrder.STATE_CANCELED
                 yield self
             elif self.state == AddOrder.STATE_CANCELED:
                 self.running=False
@@ -326,12 +341,12 @@ class AddOrder(BotGenerator):
 async def bot(client: TypingClient,
               client_account: Dict[str, Any],
               bot_name: str,
-              event_queues: EventQueues,
+              engine: 'Engine',
               conf: Dict[str, Any]):
     path = Path("ctx", bot_name + ".json")
 
     log = logging.getLogger(bot_name)
-    bot_queue = event_queues[bot_name]
+    bot_queue = engine.event_queues[bot_name]
 
     # Lecture éventuelle du context sauvegardé
     state_for_generator = {}
@@ -343,7 +358,7 @@ async def bot(client: TypingClient,
     wallet = wallet_from_symbol(client_account, conf['order']['symbol'])
     # Puis initialisation du generateur
     bot_generator = await AddOrder.create(client,
-                                          event_queues,
+                                          engine,
                                           bot_queue,
                                           log,
                                           state_for_generator,

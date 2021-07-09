@@ -21,7 +21,7 @@ class BotGenerator(dict):
     @classmethod
     async def create(cls,
                      client: AsyncClient,
-                     event_queues: EventQueues,
+                     engine: 'Engine',
                      queue: Queue,
                      log: logging,
                      init: Dict[str, Any] = {},
@@ -34,7 +34,7 @@ class BotGenerator(dict):
 
         bot_generator = await cls()._start(
             client,
-            event_queues,
+            engine,
             queue,
             log,
             init,
@@ -44,14 +44,14 @@ class BotGenerator(dict):
 
     async def _start(self,
                      client: TypingClient,
-                     event_queues: EventQueues,
+                     engine: 'Engine',
                      queue: Queue,
                      log: logging,
                      init: Dict[str, str],
                      kwargs: Dict[str, Any]) -> 'WinterSummerBot':
         """ Invoke le generateur pour initialiser le bot """
         self._generator = self.generator(client,
-                                         event_queues,
+                                         engine,
                                          queue,
                                          log,
                                          init,
@@ -62,7 +62,7 @@ class BotGenerator(dict):
     @abstractmethod
     async def generator(self,
                         client: AsyncClient,
-                        event_queues: EventQueues,
+                        engine: 'Engine',
                         queue: Queue,
                         log: logging,
                         init: Dict[str, str],  # Initial context

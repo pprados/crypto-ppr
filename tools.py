@@ -35,11 +35,10 @@ async def anext(ait):
     return await ait.__anext__()
 
 
-def benefice(log: logging, wallet: Dict[str, Decimal], initial_wallet: Dict[str, Decimal]) -> None:
-    diff = {k: float(v - initial_wallet[k]) for k, v in wallet.items()}
+async def benefice(engine: 'Engine', log: logging, wallet: Dict[str, Decimal], initial_wallet: Dict[str, Decimal]) -> None:
     log_wallet(log, initial_wallet, prefix="Initial:")
     log_wallet(log, wallet, prefix="Current:")
-    log.warning(f"###### Result: {diff}")
+    await engine.log_result(log, wallet, initial_wallet)
 
 
 def _parse_order(order: Dict[str, Any]) -> Tuple[str, str, Decimal, Decimal]:
@@ -101,8 +100,8 @@ def str_d(d: Decimal) -> str:
 
 
 def update_order(wsi: Dict[str, Any], current_price: Optional[Decimal], order: Dict[str, Any], accept_upper=True) -> \
-Dict[
-    str, Any]:
+        Dict[
+            str, Any]:
     """ Ajute l'ordre pour être conforme aux contraintes de Binance.
      :param accept_upper True if accept to pay little more price. Else raise an exception.
      """
@@ -309,8 +308,7 @@ async def to_usdt(client: AsyncClient, log: logging, asset: str, val: Decimal) -
         raise
 
 
-def _dump_order(log: Callable,
-                order: Dict[str, Any], prefix: str, suffix: str = ''):
+def _str_dump_order(order: Dict[str, Any], prefix: str, suffix: str = '') -> str:
     side, token, other, quantity, quote_order_qty, price = _parse_order(order)
     stoken = alias_symbol(token)
     sother = alias_symbol(other)
@@ -321,32 +319,33 @@ def _dump_order(log: Callable,
         pre_suffix = " for take profit"
     str_price = "MARKET" if order['type'] in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER) else str_d(price)
     if quantity and str_price != "MARKET":
-        log(f"{prefix}{side} {str_d(quantity)} {stoken} at {str_price} {sother}{pre_suffix}{suffix}")
+        return f"{prefix}{side} {str_d(quantity)} {stoken} at {str_price} {sother}{pre_suffix}{suffix}"
     elif str_price == "MARKET":
         if 'cummulativeQuoteQty' in order:
             calculate_price = Decimal(order['cummulativeQuoteQty']) / Decimal(order['executedQty'])
-            log(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {stoken} at {calculate_price} {sother}"
-                f" for {quantity * calculate_price} {sother}"
-                f" {pre_suffix}{suffix}")
+            return f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {stoken} at {calculate_price} {sother}" \
+                   f" for {quantity * calculate_price} {sother}" \
+                   f" {pre_suffix}{suffix}"
         else:
             if 'quoteOrderQty' in order:
-                log(f"{ts_to_str(get_now())}: {prefix}{side} {stoken} for {order['quoteOrderQty']} {sother}"
-                    f" at MARKET"
-                    f" {pre_suffix}{suffix}")
+                return f"{ts_to_str(get_now())}: {prefix}{side} {stoken} for {order['quoteOrderQty']} {sother}" \
+                       f" at MARKET" \
+                       f" {pre_suffix}{suffix}"
             else:
-                log(f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {stoken} at MARKET"
-                    f" {pre_suffix}{suffix}")
+                return f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {stoken} at MARKET" \
+                       f" {pre_suffix}{suffix}"
     elif quote_order_qty:
-        log(f"{prefix}{side} {stoken} for {str_d(quote_order_qty)} {sother} at MARKET"
-            f" {pre_suffix}{suffix}")
+        return f"{prefix}{side} {stoken} for {str_d(quote_order_qty)} {sother} at MARKET" \
+               f" {pre_suffix}{suffix}"
+
+
+def _dump_order(log: Callable,
+                order: Dict[str, Any], prefix: str, suffix: str = ''):
+    return log(_str_dump_order(order, prefix, suffix))
 
 
 def log_add_order(log: logging, order: Dict[str, Any], prefix=None):
     _dump_order(log.info, order, f"Try to " if not prefix else prefix, "...")
-
-
-def log_order(log: logging, order: Dict[str, Any], prefix="****** "):
-    _dump_order(log.warn, order, prefix)
 
 
 def log_wallet(log: logging, wallet: Wallet, prefix="wallet:") -> None:

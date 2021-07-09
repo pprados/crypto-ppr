@@ -26,7 +26,7 @@ def get_now() -> int:
 
 
 def ts_to_str(timestamp: int) -> str:
-    return datetime.utcfromtimestamp(timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def sleep_speed() -> int:

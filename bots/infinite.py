@@ -58,7 +58,7 @@ class InfiniteBot(BotGenerator):
 
     async def generator(self,
                         client: AsyncClient,
-                        event_queues: EventQueues,
+                        engine: 'Engine',
                         queue: Queue,
                         log: logging,
                         init: Dict[str, str],  # Initial context
@@ -109,7 +109,7 @@ class InfiniteBot(BotGenerator):
                 if 'smart_trade' in self and self.smart_trade:
                     self.smart_trade = await SmartTrade.create(
                         client,
-                        event_queues,
+                        engine,
                         queue,
                         log,
                         self.smart_trade,
@@ -127,7 +127,7 @@ class InfiniteBot(BotGenerator):
                 #     # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
                 #     msg = bot_queue.get_nowait()
                 #     if msg['e'] == 'kill':
-                #         log.warning("Receive kill")
+                #         await engine.send_telegram(log,"Receive kill")
                 #         return
                 # except QueueEmpty:
                 #     pass  # Ignore
@@ -136,10 +136,10 @@ class InfiniteBot(BotGenerator):
                     self.state = InfiniteBot.STATE_ADD_ST
 
                 elif self.state == InfiniteBot.STATE_ADD_ST:
-                    log.warning("****** New Smarttrade")
-                    self.smart_trade = await SmartTrade.create(
+                    await engine.send_telegram(log,"****** New Smarttrade")
+                    self.smart_trade = await SmartTrade.create(  # FIXME: sous-bot paramétrable
                         client,
-                        event_queues,
+                        engine,
                         queue,
                         log,
                         generator_name="testing",
@@ -203,12 +203,12 @@ class InfiniteBot(BotGenerator):
 async def bot(client: TypingClient,
               client_account: Dict[str, Any],
               bot_name: str,
-              event_queues: EventQueues,
+              engine: 'Engine',
               conf: Dict[str, Any]):
     path = Path("ctx", bot_name + ".json")
 
     log = logging.getLogger(bot_name)
-    bot_queue = event_queues[bot_name]
+    bot_queue = engine.event_queues[bot_name]
 
     # Lecture éventuelle du context sauvegardé
     state_for_generator = {}
@@ -219,7 +219,7 @@ async def bot(client: TypingClient,
 
     # Puis initialisation du generateur
     bot_generator = await InfiniteBot.create(client,
-                                             event_queues,
+                                             engine,
                                              bot_queue,
                                              log,
                                              state_for_generator,

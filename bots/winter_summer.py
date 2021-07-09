@@ -34,24 +34,19 @@ Take profit trailing https://help.3commas.io/en/articles/3108982-trailing-take-p
 """
 # TODO: client.get_lending_product_list() pour stacker en attendant, en été
 from asyncio import QueueEmpty
-from datetime import timezone
-from pathlib import Path
 
 import aiohttp
 from aiohttp import ClientConnectorError
-from binance import BinanceSocketManager
 from binance.enums import *
-# Mémorise l'état de l'automate, pour permettre une reprise à froid
-from binance.helpers import *
+from stream_multiplex import add_multiplex_socket
 
 from add_order import *
 from bot_generator import STOPPED
-from stream_multiplex import add_multiplex_socket
-from tools import atomic_load_json, generate_order_id, wait_queue_init, update_order, split_symbol, \
-    atomic_save_json, check_order, log_order, json_order, log_add_order, to_usdt, str_order, Wallet
-
-import global_flags
 from simulate_client import *
+from tools import atomic_load_json, generate_order_id, wait_queue_init, update_order, atomic_save_json, check_order, \
+    json_order, log_add_order, to_usdt, str_order
+
+# Mémorise l'état de l'automate, pour permettre une reprise à froid
 
 
 # TODO: a voir dans streams
@@ -181,7 +176,7 @@ class WinterSummerBot(BotGenerator):
                 log.info(f"Started")
 
             # FIXME Clean all new order for symbol
-            # log.warning("Cancel all orders !")
+            # await engine.send_telegram(log,"Cancel all orders !")
             # for order in await client.get_open_orders(symbol=symbol):
             #     if order["status"] == ORDER_STATUS_NEW:
             #         await client.cancel_order(symbol=order["symbol"], orderId=order["orderId"])
@@ -203,7 +198,7 @@ class WinterSummerBot(BotGenerator):
                     # Reception d'ordres venant de l'API. Par exemple, ajout de fond, arrêt, etc.
                     msg = bot_queue.get_nowait()
                     if msg['e'] == 'kill':
-                        log.warning("Receive kill")
+                        await engine.send_telegram(log,"Receive kill")
                         return
                 except QueueEmpty:
                     pass  # Ignore
@@ -356,7 +351,7 @@ class WinterSummerBot(BotGenerator):
                     await self.summer_order.next()
                     if self.summer_order.is_filled():
                         self.last_price=self.summer_order.order['price']
-                        log_order(log, self.summer_order.order)
+                        await engine.log_order(log, self.summer_order.order)
                         del self.summer_order
                         self.state = WinterSummerBot.STATE_WINTER_ORDER
                         log_wallet(log, self.wallet)
@@ -385,7 +380,7 @@ class WinterSummerBot(BotGenerator):
                     if current_price < price:
                         # adjusted_price= current_price * (1 + lower_percent)
                         adjusted_price= current_price
-                        log.warning(
+                        await engine.send_telegram(log,
                             # f"J'ai vendu trop bas à {self.last_price} {quote}.\n"
                             # f"Le prix actuel est de {current_price} {quote}\n"
                             f"Le prix cible d'achat par rapport à la moyenne précédente est de {price} {quote} "
@@ -397,7 +392,7 @@ class WinterSummerBot(BotGenerator):
 
                     if price > current_price:
                         # FIXME ajuster à la baisse, ou en profiter pour acheter en traquant la baisse ?.
-                        log.warning(
+                        await engine.send_telegram(log,
                             f"Le prix calculé cible d'achat à la baisse, par rapport à la période précédant "
                             f"s'avere > au dernier prix actuel (avg:{self.avg_price} cible:{price} > cur:{current_price}). "
                             f"Le cours est descendu encore plus bas. "
@@ -405,7 +400,7 @@ class WinterSummerBot(BotGenerator):
                         price = current_price * (1 + lower_percent)
 
                     # if (price > self.last_price):
-                    #     log.warning(f"****** Je risque de perde, en essayant d'acheter plus chère ({price} {quote}) "
+                    #     await engine.send_telegram(log,f"****** Je risque de perde, en essayant d'acheter plus chère ({price} {quote}) "
                     #                 f"que ma dernière vente ({self.last_price} {quote})")
                     quantity = self.wallet[quote] / price
 
@@ -498,7 +493,7 @@ class WinterSummerBot(BotGenerator):
 
                     if self.winter_order.is_filled():
                         if (self.winter_order.order['price'] > self.last_price):
-                            log.warning(
+                            await engine.send_telegram(log,
                                 f"****** J'ai perdu en acheter plus chère ({price} {quote}) "
                                 f"que ma dernière vente ({self.last_price} {quote})")
                         self.last_price=self.winter_order.order['price']
@@ -523,7 +518,7 @@ class WinterSummerBot(BotGenerator):
 
                     price = self.target_summer # Cherche à vendre à la cible calculé lors du changement de saison
                     if self.target_summer < self.last_price:
-                        log.warning(f"L'objectif de vente au top ({self.target_summer} {quote}), "
+                        await engine.send_telegram(log,f"L'objectif de vente au top ({self.target_summer} {quote}), "
                                     f"basé sur le top connu lors du passage a SUMMER, "
                                     f"est sous mon dernier prix d'achat {self.last_price} {quote}. "
                                     f"J'ajuste à {upper_percent * 100}% du nouveau plus haut. "
@@ -657,13 +652,13 @@ class WinterSummerBot(BotGenerator):
 async def bot(client: AsyncClient,
               client_account: Dict[str, Any],
               bot_name: str,
-              agent_queues: Dict[str, Queue],
+              engine: 'Engine',
               conf: Dict[str, str]):
     path = Path("ctx", bot_name + ".json")
 
     log = logging.getLogger(bot_name)
     socket_manager = client.getBinanceSocketManager()
-    bot_queue = agent_queues[bot_name]
+    bot_queue = engine.agent_queues[bot_name]
 
     # Lecture éventuelle du context sauvegardé
     json_generator = {}

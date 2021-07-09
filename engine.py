@@ -10,14 +10,16 @@ from typing import Dict, List, Any, Optional, Set
 import sdnotify
 from aiohttp import ClientConnectorError
 from binance.exceptions import BinanceAPIException
+from telethon import TelegramClient
 
 import global_flags
 from TypingClient import TypingClient
+from api_key import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE
 from atomic_json import atomic_load_json, atomic_save_json
-from conf import MIN_RECONNECT_WAIT, SLIPPING_TIME
+from conf import MIN_RECONNECT_WAIT, SLIPPING_TIME, NO_TELEGRAM
 from events_queues import EventQueues
 from simulate_client import SimulateFixedValues
-from tools import generate_bot_id, log_wallet
+from tools import generate_bot_id, log_wallet, _str_dump_order
 
 
 class EngineMsg(Enum):
@@ -38,7 +40,7 @@ class Engine:
                  api_secret: str,
                  test_net: bool,
                  simulate: bool,
-                 path:Optional[Path]=None,
+                 path: Optional[Path] = None,
                  ):
         self.api_key = api_key
         self.api_secret = api_secret
@@ -56,8 +58,34 @@ class Engine:
             logging.warning("Use the rollback version of conf.json")
         if not self.engine_conf:
             self.engine_conf = []  # Bot dans l'ordre inverse d'insertion
+        if not NO_TELEGRAM:
+            self._telegram = TelegramClient('auto-trading', TELEGRAM_API_ID, TELEGRAM_API_HASH)
+
+    async def init(self):
+        """ Constructeur asynchrone """
+        if not NO_TELEGRAM:
+            await self._init_telegram()
         loop = get_event_loop()
         self._engine_thread = loop.create_task(self.run())  # Démarre le thread pour le moteur
+
+    async def _init_telegram(self):
+        await self._telegram.connect()
+        if not await self._telegram.is_user_authorized():
+            self._telegram.send_code_request(TELEGRAM_PHONE)
+            self._telegram.sign_in(TELEGRAM_PHONE, input('Enter the code: '))
+
+    async def send_telegram(self, log, message: str):
+        log.warning(message)
+        if not NO_TELEGRAM:
+            await self._telegram.send_message(TELEGRAM_PHONE, message)
+
+    async def log_order(self, log, order: Dict[str, Any], prefix:str ="****** ",suffix: str = ''):
+        await self.send_telegram(log,_str_dump_order(order, prefix, suffix))
+
+    async def log_result(self, log, wallet: Dict[str, Decimal], initial_wallet: Dict[str, Decimal]):
+        diff = {k: float(v - initial_wallet[k]) for k, v in wallet.items()}
+        message = f"###### Result: {diff}"
+        await self.send_telegram(log,message)
 
     def __del(self):
         self._engine_thread.cancel()
@@ -127,11 +155,11 @@ class Engine:
 
         async_fun = getattr(module, fn)
         self.event_queues.add_queue(id)
-        task=loop.create_task(async_fun(self.client,
-                                                 self.client_account,
-                                                 id,
-                                                 self.event_queues,
-                                                 conf))
+        task = loop.create_task(async_fun(self.client,
+                                          self.client_account,
+                                          id,
+                                          self,
+                                          conf))
         task.set_name(id)
         self.bots.add(task)
 
@@ -186,6 +214,7 @@ class Engine:
                     }
         else:
             return {}
+
     async def list_bot_id(self):
         return [Engine._resume(k, self.dict_engine_conf[k]) for k in self.dict_engine_conf.keys()]
 
@@ -203,7 +232,7 @@ class Engine:
         loop = get_event_loop()
         log = self.log
         log.info("Start auto_trading")
-        unfinished = []
+        await self.send_telegram(log, "Auto-trading started")
 
         n = sdnotify.SystemdNotifier()
         n.notify("READY=1")  # Informe SystemD

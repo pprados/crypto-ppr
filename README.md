@@ -205,6 +205,10 @@ systemctl --user daemon-reload
 
 systemctl --user daemon-reload ; systemctl --user restart   auto-trading ; journalctl --user-unit    auto-trading
 
+
+# Telegram
+https://www.geeksforgeeks.org/send-message-to-telegram-user-using-python/
+
 ## Installation Raspberry PI
 - Création de l'image
 rpi-imager

@@ -21,7 +21,7 @@ from starlette import status
 from starlette.responses import JSONResponse, Response
 
 import global_flags
-from api_key import api_key, api_secret, test_net, USER, PASSWORD
+from api_key import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TEST_NET, USER, PASSWORD
 from engine import Engine
 from request_json_comments import JsonCommentRoute
 
@@ -34,8 +34,8 @@ async def startup():
     # Creation de l'engine pour les bots. A garder dans une variable globale
     # pour que les threads associés restent en vie.
     global engine
-    engine = Engine(api_key, api_secret, test_net, global_flags.simulate, path=engine_path)
-    await sleep(1)  # Wait the startup
+    engine = Engine(BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TEST_NET, global_flags.simulate, path=engine_path)
+    await engine.init()
 
 
 security = HTTPBasic()
