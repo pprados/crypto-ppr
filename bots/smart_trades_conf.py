@@ -59,10 +59,10 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
     params.price = Decimal(str(conf["price"])) if "price" in conf else None
     params.order_price = Decimal(str(conf["order_price"])) if "order_price" in conf else None
     assert params.mode != COND_LIMIT_ORDER or params.order_price
-    assert params.mode in (MARKET,COND_MARKET_ORDER) or params.price
+    assert params.mode in (MARKET, COND_MARKET_ORDER) or params.price
     params.trailing_buy = Decimal(conf['trailing'].strip('%')) / 100 if 'trailing' in conf else None
     assert not params.mode in (COND_LIMIT_ORDER, COND_MARKET_ORDER) or not params.trailing_buy
-    assert not params.total or not params.mode == LIMIT
+    # assert not params.total or not params.mode == MARKET
 
     # TAKE PROFIT
     params.use_take_profit = "take_profit" in conf
@@ -70,14 +70,14 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
         take_profit_conf: Dict[str, Any] = conf["take_profit"]
         params.take_profit_mode = take_profit_conf["mode"]
         assert params.take_profit_mode in (MARKET, LIMIT, COND_MARKET_ORDER, COND_LIMIT_ORDER)
-        params.take_profit_mode_sell = take_profit_conf.get("mode_sell",MARKET)
+        params.take_profit_mode_sell = take_profit_conf.get("mode_sell", MARKET)
         if '%' in params.take_profit_mode_sell:
             # Utilisation de limit, avec un delta
             params.take_profit_mode_sell_percent = Decimal(params.take_profit_mode_sell.strip('%')) / 100
-            params.take_profit_mode_sell=LIMIT
+            params.take_profit_mode_sell = LIMIT
         else:
-            params.take_profit_mode_sell_percent=0
-        params.take_profit_sell_timeout = take_profit_conf.get("sell_timeout",0)
+            params.take_profit_mode_sell_percent = 0
+        params.take_profit_sell_timeout = take_profit_conf.get("sell_timeout", 0)
 
         params.take_profit_base = take_profit_conf["base"]
         params.take_profit_limit_percent = None
@@ -108,14 +108,14 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
         stop_loss_conf: Dict[str, Any] = conf["stop_loss"]
         params.stop_loss_mode = stop_loss_conf.get("mode", "ask")  # "cond_limit", "market"
         assert params.stop_loss_mode in [MARKET, COND_LIMIT_ORDER]
-        params.stop_loss_mode_sell = stop_loss_conf.get("mode_sell",MARKET)
+        params.stop_loss_mode_sell = stop_loss_conf.get("mode_sell", MARKET)
         if '%' in params.stop_loss_mode_sell:
             # Utilisation de limit, avec un delta
             params.stop_loss_mode_sell_percent = Decimal(params.stop_loss_mode_sell.strip('%')) / 100
-            params.stop_loss_mode_sell=LIMIT
+            params.stop_loss_mode_sell = LIMIT
         else:
-            params.stop_loss_mode_sell_percent=0
-        params.stop_loss_sell_timeout = stop_loss_conf.get("sell_timeout",0)
+            params.stop_loss_mode_sell_percent = 0
+        params.stop_loss_sell_timeout = stop_loss_conf.get("sell_timeout", 0)
 
         params.stop_loss_base = stop_loss_conf["base"]
         l = stop_loss_conf.get("price")

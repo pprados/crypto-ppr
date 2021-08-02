@@ -80,6 +80,8 @@ class InfiniteBot(BotGenerator):
                     "state": InfiniteBot.STATE_INIT,
                     "smart_trade": None,
                     "wallet": {},
+                    "loop": 1,  # FIXME : parametre
+                    "idx":0
                 }
             self.update(init)
             del init
@@ -152,7 +154,11 @@ class InfiniteBot(BotGenerator):
                     await anext(self.smart_trade)
                     if self.smart_trade.is_finished():
                         await sleep(1)
-                        self.state = InfiniteBot.STATE_ADD_ST
+                        self.idx +=1
+                        if self.loop >0 and self.idx > self.loop:
+                            self.state = BotGenerator.STATE_FINISHED
+                        else:
+                            self.state = InfiniteBot.STATE_ADD_ST
                     if self.smart_trade.is_error():
                         log.error("Smart trade in error")
                         self._set_state_error()

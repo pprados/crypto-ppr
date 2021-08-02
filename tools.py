@@ -149,9 +149,9 @@ def update_order(wsi: Dict[str, Any], current_price: Optional[Decimal], order: D
             assert ("BUG")
         order['quantity'] = quantity  # round_step_size(quantity, wsi.lot.stepSize)
     if "price" in order:
-        order["price"] = price
+        order["price"] = remove_exponent(price)
     if "stopPrice" in order:
-        order["stopPrice"] = stopPrice
+        order["stopPrice"] = remove_exponent(stopPrice)
 
     # dernière vérification
     check_order(wsi, current_price, order)
@@ -285,6 +285,8 @@ def wallet_from_symbol(client_account, symbol):
     wallet[quote] = balance_quote["free"]
     return wallet
 
+def remove_exponent(d:Decimal) -> Decimal:
+    return d.quantize(Decimal(1)) if d == d.to_integral() else d.normalize()
 
 async def to_usdt(client: AsyncClient, log: logging, asset: str, val: Decimal) -> Decimal:
     try:

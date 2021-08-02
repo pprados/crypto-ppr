@@ -72,6 +72,7 @@
     // Le declenchement du prix en valeur ou %
     // 100.0: vend à 100.0
     // "-3%" : Vend sous le prix d'achat-3% (doit être négatif)
+    // "-50" : Vend SL sous le prix d'achat-50, fixe la perte théorique maximum, en valeur (doit etre négatif)
     // Si mode == "COND_LIMIT_ORDER", utilse "price" comme signal de dépot d'ordre
     "price": "-2%",
 

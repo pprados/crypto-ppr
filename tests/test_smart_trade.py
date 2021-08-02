@@ -7,8 +7,13 @@ from unittest.mock import patch, MagicMock
 import pytest
 from binance.enums import ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET, ORDER_TYPE_TAKE_PROFIT_LIMIT, ORDER_TYPE_STOP_LOSS_LIMIT
 
+import global_flags
+from api_key import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TEST_NET
+from auto_trading import engine_path
 from bots.add_order import AddOrder
 from bots.smart_trade import SmartTrade
+from conf import NO_TELEGRAM
+from engine import Engine
 from events_queues import EventQueues
 from simulate_client import TestBinanceClient, AbstractSimulateValue, _SimulateUserSocket
 from tools import anext
@@ -25,6 +30,15 @@ class AsyncMock(MagicMock):
         return super(AsyncMock, self).__call__(*args, **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def run_before_and_after_tests(tmpdir):
+    """Fixture to execute asserts before and after a test is run"""
+    # Setup: fill with any logic you want
+    assert NO_TELEGRAM, "Set NO_TELEGRAM=True"
+    yield  # this is where the testing happens
+    # Teardown : fill with any logic you want
+
+
 async def init_test(conf, values):
     class FixedValues(AbstractSimulateValue):
         def __init__(self, values):
@@ -33,6 +47,9 @@ async def init_test(conf, values):
 
         def generate_values(self):
             return (v for v in self.values)
+
+    engine = Engine(BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TEST_NET, global_flags.simulate, path=engine_path)
+    await engine.init()
 
     client = await TestBinanceClient.create(api_key, api_secret, testnet=test_net,
                                             values=FixedValues(values))
@@ -46,7 +63,7 @@ async def init_test(conf, values):
             "btcusdt@bookTicker"
         ])
     agent_queue = event_queues.add_queue(bot_name)
-    return agent_queue, bot_name, client, client_account, conf, event_queues
+    return engine, agent_queue, bot_name, client, client_account, conf, event_queues
 
 
 async def test_simple_order_with_unit_at_market_with_event():
@@ -62,16 +79,18 @@ async def test_simple_order_with_unit_at_market_with_event():
             Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
             Decimal(1100),  # STATE_ADD_ORDER, create_order()
             Decimal(1100),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+            # Decimal(1100),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+            # Decimal(1100),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -83,11 +102,16 @@ async def test_simple_order_with_unit_at_market_with_event():
     assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # INIT
-    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
-    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
-    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ORDER_FILLED
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
     await anext(smart_trade)
     assert smart_trade.is_finished()
@@ -111,13 +135,13 @@ async def test_simple_order_with_total_at_market_with_event():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -157,13 +181,13 @@ async def test_simple_order_with_size_at_market_with_event():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -211,13 +235,13 @@ async def test_simple_order_with_with_poll(mock_recv_method):
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -257,13 +281,13 @@ async def test_simple_order_with_unit_at_limit_with_event():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -307,13 +331,13 @@ async def test_simple_order_with_cond_limit_order_at_market_with_event():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -355,13 +379,13 @@ async def test_simple_order_with_cond_market_order_at_market_with_event():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -404,7 +428,7 @@ async def test_positive_trailing_buy_order_from_market():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     sim_socket_manager = client.get_socket_manager()
 
     sim_socket_manager.add_multicast_events(
@@ -446,7 +470,7 @@ async def test_positive_trailing_buy_order_from_market():
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -491,7 +515,7 @@ async def test_negative_trailing_buy_order_from_market():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     client.get_socket_manager().add_multicast_events(
         [
             {
@@ -531,7 +555,7 @@ async def test_negative_trailing_buy_order_from_market():
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -583,13 +607,13 @@ async def test_simple_order_at_market_tp_last():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -646,12 +670,12 @@ async def test_simple_order_at_market_tp_ask():
             Decimal(1000),  #
         ]
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -731,12 +755,12 @@ async def test_simple_order_at_market_tp_ask_limit():
             Decimal(1000),  #
         ]
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -822,12 +846,12 @@ async def test_simple_order_at_market_tp_ask_limit_percent():
             Decimal(1000),  #
         ]
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -872,7 +896,7 @@ async def test_simple_order_at_market_tp_ask_limit_percent():
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
     await anext(smart_trade)
-    assert smart_trade.take_profit_order.price  == Decimal("999.9")
+    assert smart_trade.take_profit_order.price == Decimal("999.9")
     assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
     await anext(smart_trade)  # INIT
     await anext(smart_trade)  # STATE_ADD_ORDER
@@ -910,12 +934,12 @@ async def test_simple_order_at_market_tp_ask_limit_timeout():
             Decimal(1000),  #
         ]
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -1010,12 +1034,12 @@ async def test_simple_order_at_market_tp_bid():
             Decimal(1000),  #
         ]
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -1096,13 +1120,13 @@ async def test_simple_order_at_market_tp_last_trailing_negatif():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -1206,13 +1230,13 @@ async def test_simple_order_at_market_tp_last_trailing_positif():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -1316,13 +1340,13 @@ async def test_simple_order_at_market_tp_last_limit_trailing_negatif():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -1426,13 +1450,13 @@ async def test_simple_order_at_market_tp_last_limit_trailing_positif():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -1536,12 +1560,12 @@ async def test_simple_order_at_market_min_tp_activate():
             Decimal(1000),  #
         ]
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -1675,12 +1699,12 @@ async def test_simple_order_trailing_min_tp_activate():
             Decimal(1000),  #
         ]
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -1840,12 +1864,12 @@ async def test_simple_order_at_market_min_tp_no_activate():
             Decimal(1000),
         ]
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -1970,13 +1994,13 @@ async def test_simple_order_at_market_sl_last():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -2047,13 +2071,13 @@ async def test_simple_order_at_market_sl_ask():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -2110,14 +2134,20 @@ async def test_simple_order_at_market_sl_ask():
     assert smart_trade.state == SmartTrade.STATE_SL
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await anext(smart_trade)  # INIT
-    await anext(smart_trade)  # STATE_ADD_ORDER
-    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
-    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
-    await anext(smart_trade)  # FINISH
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
@@ -2151,13 +2181,13 @@ async def test_simple_order_at_market_sl_ask_limit():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -2214,19 +2244,124 @@ async def test_simple_order_at_market_sl_ask_limit():
     assert smart_trade.state == SmartTrade.STATE_SL
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await anext(smart_trade)  # INIT
-    await anext(smart_trade)  # STATE_ADD_ORDER
-    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
-    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
-    await anext(smart_trade)  # FINISH
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
     assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_LIMIT
     assert smart_trade.active_stop_loss_condition == Decimal("990.0")
+
+
+async def test_simple_order_at_market_sl_ask_limit_price():
+    """ Test le passage d'un ordre simple, avec SL simple en valeur sur ask """
+    # Dont générer un order TP
+    conf = {
+        "symbol": "BTCUSDT",
+        "unit": 0.1,
+        "mode": "MARKET",
+        "stop_loss": {
+            "base": "ask",
+            "mode": "MARKET",
+            "price": "-20",
+            "mode_sell": "LIMIT",
+        },
+    }
+    values = \
+        [
+            Decimal(0),  # Init
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1000),  # STATE_ADD_ORDER, create_order()
+            Decimal(1000),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+            Decimal(900),  # Stop loss
+            Decimal(1000),  #
+            Decimal(1000),  #
+        ]
+
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          engine,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # INIT
+    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
+    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
+    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_TRAILING
+    client.get_socket_manager().add_multicast_events([
+        {
+            "stream": "btcusdt@bookTicker",
+            "data": {
+                "e": "trade",
+                "s": "BTCUSDT",
+                "b": "900",
+                "a": "1000"  # 3. Pas encore
+            }
+        },
+        {
+            "stream": "btcusdt@bookTicker",
+            "data": {
+                "e": "trade",
+                "s": "BTCUSDT",
+                "b": "900",
+                "a": "800"  # Cible
+            }
+        }
+    ])
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_TRAILING
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_SL
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
+    assert smart_trade.stop_loss_order.order['type'] == ORDER_TYPE_LIMIT
+    assert smart_trade.active_stop_loss_condition == Decimal("800.0")
 
 
 async def test_simple_order_at_market_sl_ask_limit_timeout():
@@ -2256,13 +2391,13 @@ async def test_simple_order_at_market_sl_ask_limit_timeout():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -2319,14 +2454,16 @@ async def test_simple_order_at_market_sl_ask_limit_timeout():
     assert smart_trade.state == SmartTrade.STATE_SL
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
     await anext(smart_trade)
     assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
     await anext(smart_trade)
     assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
     await anext(smart_trade)
-    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT  # Reprend l'ordre en MARKET
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT  # Reprise au market
     await anext(smart_trade)
     assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
     await anext(smart_trade)
@@ -2337,6 +2474,7 @@ async def test_simple_order_at_market_sl_ask_limit_timeout():
     assert smart_trade.stop_loss_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
     await anext(smart_trade)
     assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    assert smart_trade.state == SmartTrade.STATE_FINISH
     await anext(smart_trade)
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
@@ -2369,13 +2507,13 @@ async def test_simple_order_at_market_sl_bid():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -2432,14 +2570,20 @@ async def test_simple_order_at_market_sl_bid():
     assert smart_trade.state == SmartTrade.STATE_SL
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await anext(smart_trade)  # INIT
-    await anext(smart_trade)  # STATE_ADD_ORDER
-    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
-    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
-    await anext(smart_trade)  # FINISH
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
@@ -2472,13 +2616,13 @@ async def test_simple_order_at_market_sl_last_trailing():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -2532,14 +2676,20 @@ async def test_simple_order_at_market_sl_last_trailing():
     assert smart_trade.state == SmartTrade.STATE_SL
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await anext(smart_trade)  # INIT
-    await anext(smart_trade)  # STATE_ADD_ORDER
-    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
-    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
-    await anext(smart_trade)  # FINISH
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
@@ -2572,13 +2722,13 @@ async def test_simple_order_at_limit_sl_last_trailing():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -2632,14 +2782,20 @@ async def test_simple_order_at_limit_sl_last_trailing():
     assert smart_trade.state == SmartTrade.STATE_SL
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await anext(smart_trade)  # INIT
-    await anext(smart_trade)  # STATE_ADD_ORDER
-    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
-    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
-    await anext(smart_trade)  # FINISH
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
@@ -2673,13 +2829,13 @@ async def test_simple_order_at_cond_limit_sl_last_trailing():
         ]
 
     # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
 
     # Execution du generator
     json_generator = {}  # Initial state
     log = logging.getLogger("TEST")
     smart_trade = await SmartTrade.create(client,
-                                          event_queues,
+                                          engine,
                                           agent_queue,
                                           log,
                                           json_generator,
@@ -2733,14 +2889,20 @@ async def test_simple_order_at_cond_limit_sl_last_trailing():
     assert smart_trade.state == SmartTrade.STATE_SL
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_INIT
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_WAIT_SL_FILLED
-    await anext(smart_trade)  # INIT
-    await anext(smart_trade)  # STATE_ADD_ORDER
-    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
-    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
-    await anext(smart_trade)  # FINISH
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.stop_loss_order.state == AddOrder.STATE_ORDER_FILLED
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")

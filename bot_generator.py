@@ -72,6 +72,9 @@ class BotGenerator(dict):
                         **kwargs) -> None:
         pass
 
+    def __repr__(self):
+        return "{TODO}" # dict.__repr__(self)self.__dict__.__repr__()
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.__dict__ = self
