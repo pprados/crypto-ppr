@@ -57,8 +57,7 @@ app = FastAPI(on_startup=[startup],
               ocs_url=None, redoc_url=None, openapi_url=None)
 app.router.route_class = JsonCommentRoute
 
-# engine: Optional[Engine] = None  # Python 3.8
-engine = None  # Python 3.7
+engine: Optional[Engine] = None  # Python 3.8
 
 
 @app.get("/openapi.json")

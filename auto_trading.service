@@ -7,8 +7,8 @@ After=network.target
 
 [Service]
 # Active le Venv
-Environment="HOME_AUTO_TRADE=/opt/auto_trading"
-Environment="PATH=/opt/auto_trading/venv/bin:/usr/bin:/bin"
+Environment="HOME_AUTO_TRADE=/usr/src/app"
+Environment="PATH=/usr/src/app/venv/bin:/usr/bin:/bin"
 Environment=PYTHONUNBUFFERED=true
 User=pi
 
@@ -16,12 +16,13 @@ User=pi
 StandardOutput=inherit
 StandardError=inherit
 Restart=always
-WorkingDirectory=/opt/auto_trading
-ExecStart=/opt/auto_trading/venv/bin/python3 /opt/auto_trading/auto_trading.py
+WorkingDirectory=/usr/src/app
+ExecStart=/usr/src/app/venv/bin/python3 /usr/src/app/auto_trading.py
 
 # Indique qu'il attend les events du code via SystemdNotifier notify
 Type=simple
 
+# Alternative avec watch dog
 #Type=notify
 #WatchdogSec=30
 #Restart=on-failure

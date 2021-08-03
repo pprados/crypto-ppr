@@ -33,6 +33,7 @@ class InfiniteBot(BotGenerator):
     STATE_ADD_ST = "add_smart_trade"
     STATE_WAIT_ST = "wait_smart_trade"
 
+    STATE_FINISH = "finish"
     STATE_ERROR = BotGenerator.STATE_ERROR
 
     def is_finished(self):
@@ -80,12 +81,13 @@ class InfiniteBot(BotGenerator):
                     "state": InfiniteBot.STATE_INIT,
                     "smart_trade": None,
                     "wallet": {},
-                    "loop": 1,  # FIXME : parametre
+                    "loop": 0,
                     "idx":0
                 }
             self.update(init)
             del init
             params = conf
+            self.loop=int(params.get("loop","0"))
             symbol = params['st_conf']['symbol']
 
             # ---- Initialisation du bot
@@ -155,14 +157,20 @@ class InfiniteBot(BotGenerator):
                     if self.smart_trade.is_finished():
                         await sleep(1)
                         self.idx +=1
-                        if self.loop >0 and self.idx > self.loop:
-                            self.state = BotGenerator.STATE_FINISHED
+                        if self.loop >0 and self.idx >= self.loop:
+                            self.state = InfiniteBot.STATE_FINISH
                         else:
                             self.state = InfiniteBot.STATE_ADD_ST
                     if self.smart_trade.is_error():
                         log.error("Smart trade in error")
                         self._set_state_error()
                     yield self
+                elif self.state == InfiniteBot.STATE_FINISH:
+                    log.warning(f"Loop '{generator_name}' finished")
+                    self.state = SmartTrade.STATE_FINISHED
+                    yield self
+                elif self.state == SmartTrade.STATE_FINISHED:
+                    return
                 elif self.state == SmartTrade.STATE_ERROR:
                     self._set_state_error()
                     return

@@ -36,6 +36,8 @@ class SmartTrade(BotGenerator):
 
     STATE_INIT = "init"
     STATE_TRAILING_BUY = "trailing_buy"
+    STATE_COND_MARKET_ORDER = "cond_market_order"
+    STATE_COND_LIMIT_ORDER = "cond_limit_order"
     STATE_CREATE_BUY_ORDER = "create_buy_order"
     STATE_WAIT_ADD_ORDER_FILLED = "wait_add_order_filled"
     STATE_BUY_ORDER_FILLED = "buy_order_filled"
@@ -348,15 +350,32 @@ class SmartTrade(BotGenerator):
                                 self.active_buy_condition = price
                             else:
                                 price = params.price
-                                self.active_buy_condition = (price * (1 + self.trailing_buy)) # .normalize()
+                                self.active_buy_condition = (price * (1 + self.trailing_buy))  # .normalize()
 
-                            self.buy_condition = (price * (1 + self.trailing_buy)) # .normalize()
+                            self.buy_condition = (price * (1 + self.trailing_buy))  # .normalize()
                             self.activate_trailing_buy = True
                         log.info(f"Activate trailing buy at {self.buy_condition} {squote}")
                         self.state = SmartTrade.STATE_TRAILING_BUY
                     else:
-                        self.state = SmartTrade.STATE_CREATE_BUY_ORDER
+                        if params.mode == COND_MARKET_ORDER:
+                            self.state = SmartTrade.STATE_COND_MARKET_ORDER
+                        elif params.mode == COND_LIMIT_ORDER:
+                            self.state = SmartTrade.STATE_COND_LIMIT_ORDER
+                        else:
+                            self.state = SmartTrade.STATE_CREATE_BUY_ORDER
                     yield self
+
+                elif self.state in [SmartTrade.STATE_COND_MARKET_ORDER, SmartTrade.STATE_COND_LIMIT_ORDER]:
+                    msg = await queue.get()
+                    check_error(msg)
+                    if msg["_stream"].endswith("@trade") and \
+                            msg['e'] == "trade" and msg['s'] == params.symbol:
+                        trade_price = Decimal(msg['p'])
+                        log.debug(f"{trade_price=}")
+                        if trade_price >= params.cond_price:
+                            self.state = SmartTrade.STATE_CREATE_BUY_ORDER
+                            log.info(f"Price >= {params.cond_price}. Activate buy order")
+                            yield self
 
                 elif self.state == SmartTrade.STATE_TRAILING_BUY:
                     msg = await queue.get()
@@ -386,18 +405,12 @@ class SmartTrade(BotGenerator):
                     elif params.total:
                         order["quoteOrderQty"] = params.total
 
-                    if params.trailing_buy or params.mode == MARKET:
+                    if params.trailing_buy or params.mode in [MARKET, COND_MARKET_ORDER]:
                         order["type"] = ORDER_TYPE_MARKET
-                    elif params.mode == LIMIT:
+                    elif params.mode in [LIMIT, COND_LIMIT_ORDER]:
                         order["type"] = ORDER_TYPE_LIMIT
                         order["timeInForce"] = TIME_IN_FORCE_GTC  # TODO: paramétrable ?
                         order["price"] = remove_exponent(params.price)
-                    elif params.mode == COND_LIMIT_ORDER:
-                        # TODO Will be placed on the exchange order book when the conditional order triggers
-                        raise NotImplementedError("COND_LIMIT_ORDER")
-                    elif params.mode == COND_MARKET_ORDER:
-                        # TODO Will be placed on the exchange order book when the conditional order triggers
-                        raise NotImplementedError("COND_MARKET_ORDER")
                     else:
                         raise ValueError("type error")
 
@@ -437,7 +450,8 @@ class SmartTrade(BotGenerator):
                             if params.stop_loss_limit:
                                 if params.stop_loss_limit < 0:  # Indique la perte acceptable en volume
                                     # Calcul du stop price, pour ne perde que stop_loss_limit
-                                    stop_loss_limit=(-(-params.stop_loss_limit/self.buy_order.quantity-self.buy_order.price))
+                                    stop_loss_limit = (
+                                        -(-params.stop_loss_limit / self.buy_order.quantity - self.buy_order.price))
                                     percent = stop_loss_limit / self.buy_order.price - 1
                                 else:
                                     percent = params.stop_loss_limit / self.buy_order.price - 1
@@ -455,10 +469,13 @@ class SmartTrade(BotGenerator):
                                 # SL avec trailing. Ne peux pas utiliser un ordre SL.
                                 if params.stop_loss_trailing:
                                     log.info(
-                                        f"Set trailing stop-loss condition at {self.active_stop_loss_condition} ({percent * 100}%) ({params.stop_loss_base})")
+                                        f"Set TSL condition at {self.active_stop_loss_condition:+} ({percent * 100:+}% / "
+                                        f"{remove_exponent(self.buy_order.price * self.buy_order.quantity * -percent):+} "
+                                        f"{squote}) ({params.stop_loss_base})")
                                 else:
                                     log.info(
-                                        f"Set stop-loss condition at {self.active_stop_loss_condition} ({params.stop_loss_base})")
+                                        f"Set SL condition at {self.active_stop_loss_condition:+} "
+                                        f"({params.stop_loss_base})")
                                 self.state = SmartTrade.STATE_TRAILING
 
                         if params.use_take_profit:
@@ -468,8 +485,8 @@ class SmartTrade(BotGenerator):
                                 self.min_tp_activated = False
                                 self.activate_min_tp = None
                                 log.info(
-                                    f"Set Min-Take-Profit trigger condition at "
-                                    f"{self.min_tp_target} {squote} (+{params.minimal * 100}%)"
+                                    f"Set MTP trigger condition at "
+                                    f"{self.min_tp_target:+} {squote} ({remove_exponent(params.minimal * 100):+}%)"
                                     f" ({params.take_profit_base})")
                             if not params.take_profit_trailing \
                                     and not params.minimal \
@@ -499,18 +516,18 @@ class SmartTrade(BotGenerator):
                                     assert self.active_take_profit_sell < self.active_take_profit_condition
                                     assert tp_sell_condition > 0
                                     log.info(
-                                        f"Set Take-Profit trigger condition at "
-                                        f"{self.active_take_profit_condition} {squote}"
-                                        f" (+{((self.active_take_profit_condition / self.buy_order.price) - 1) * 100}%)"
+                                        f"Set TTP trigger condition at "
+                                        f"{self.active_take_profit_condition:+} {squote}"
+                                        f" ({remove_exponent(((self.active_take_profit_condition / self.buy_order.price) - 1) * 100):+}%)"
                                         f" ({params.take_profit_base})")
                                     log.info(
-                                        f"Set Take-Profit sell condition at {self.active_take_profit_sell} {squote}"
-                                        f" (+{tp_sell_condition}%)")
+                                        f"Set TTP sell condition at {self.active_take_profit_sell:+} {squote}"
+                                        f" ({remove_exponent(tp_sell_condition):+}%)")
                                 else:
                                     self.active_take_profit_condition = tp_price
                                     log.info(
-                                        f"Set take profit trigger condition at {self.active_take_profit_condition} {squote}"
-                                        f" (+{(self.active_take_profit_condition / self.buy_order.price - 1) * 100}%)")
+                                        f"Set TP trigger condition at {self.active_take_profit_condition} {squote}"
+                                        f" ({remove_exponent((self.active_take_profit_condition / self.buy_order.price - 1) * 100):+}%)")
 
                                 self.active_take_profit_trailing = False
                                 self.state = SmartTrade.STATE_TRAILING
@@ -623,7 +640,8 @@ class SmartTrade(BotGenerator):
                             if ORDER_TYPE_STOP_LOSS_LIMIT in symbol_info.orderTypes:
                                 order["type"] = ORDER_TYPE_STOP_LOSS_LIMIT
                                 order["timeInForce"] = TIME_IN_FORCE_GTC  # TODO: paramétrable ?
-                                order["price"] = remove_exponent(self.active_stop_loss_condition)  # TODO: trouver explication
+                                order["price"] = remove_exponent(
+                                    self.active_stop_loss_condition)  # TODO: trouver explication
                                 order["stopPrice"] = remove_exponent(self.active_stop_loss_condition)
                                 order["quantity"] = self.buy_order.quantity
                             else:
@@ -734,7 +752,8 @@ class SmartTrade(BotGenerator):
                         if params.stop_loss_mode_sell == ORDER_TYPE_LIMIT:
                             order["type"] = ORDER_TYPE_LIMIT
                             order["price"] = \
-                                remove_exponent((self.stop_loss_trigger_price * (1 + params.stop_loss_mode_sell_percent)))
+                                remove_exponent(
+                                    (self.stop_loss_trigger_price * (1 + params.stop_loss_mode_sell_percent)))
                             order["timeInForce"] = TIME_IN_FORCE_GTC
                         else:
                             order["type"] = ORDER_TYPE_MARKET
@@ -770,7 +789,7 @@ class SmartTrade(BotGenerator):
                             "type": ORDER_TYPE_LIMIT,
                             "price":
                                 remove_exponent((self.take_profit_trigger_price * (
-                                            1 + params.take_profit_mode_sell_percent))),
+                                        1 + params.take_profit_mode_sell_percent))),
                             "timeInForce": TIME_IN_FORCE_GTC,
                             "quantity": self.buy_order.quantity
                         }

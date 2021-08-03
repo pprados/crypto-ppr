@@ -2,6 +2,7 @@
 {
   "bot": "infinite_st",
   "comment": "Injection sans fin de ST",
+  "loop": 0, // Taille de la boucle. Zéro pour l'infini.
   "st_conf": {
     "bot": "smart_trade",
     "comment": "Essaie de l'API",

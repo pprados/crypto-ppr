@@ -95,8 +95,7 @@ def generate_bot_id(bot: str):
 
 
 def str_d(d: Decimal) -> str:
-    s = f"{d:.20f}"
-    return s.rstrip('0').rstrip('.') if '.' in s else s
+    return str(remove_exponent(d))
 
 
 def update_order(wsi: Dict[str, Any], current_price: Optional[Decimal], order: Dict[str, Any], accept_upper=True) -> \

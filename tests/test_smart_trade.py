@@ -12,6 +12,7 @@ from api_key import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TEST_NET
 from auto_trading import engine_path
 from bots.add_order import AddOrder
 from bots.smart_trade import SmartTrade
+from bots.smart_trades_conf import COND_MARKET_ORDER, COND_LIMIT_ORDER
 from conf import NO_TELEGRAM
 from engine import Engine
 from events_queues import EventQueues
@@ -407,6 +408,157 @@ async def test_simple_order_with_cond_market_order_at_market_with_event():
     assert smart_trade.is_finished()
     assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.buy_order.order['quantity'] == 0.1
+
+
+async def test_cond_market_simple_order():
+    """ Test le passage d'un ordre market en cond limit """
+    conf = {
+        "symbol": "BTCUSDT",
+        "unit": 0.1,
+        "mode": COND_MARKET_ORDER,
+        "cond_price": 1000
+    }
+    values = \
+        [
+            Decimal(0),  # Init
+            Decimal(800),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1100),  # STATE_ADD_ORDER, create_order()
+            Decimal(1100),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+        ]
+
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    sim_socket_manager = client.get_socket_manager()
+
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          engine,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_COND_MARKET_ORDER
+    sim_socket_manager.add_multicast_events(
+        [
+            {
+                "stream": "btcusdt@trade",
+                "data": {
+                    "e": "trade",
+                    "s": "BTCUSDT",
+                    "p": "900"  # 6. Buy
+                }
+            },
+            {
+                "stream": "btcusdt@trade",
+                "data": {
+                    "e": "trade",
+                    "s": "BTCUSDT",
+                    "p": "1000"  # 6. Buy
+                }
+            },
+        ])
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ORDER_FILLED
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_MARKET
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
+
+
+async def test_cond_limit_simple_order():
+    """ Test le passage d'un ordre market en cond limit """
+    conf = {
+        "symbol": "BTCUSDT",
+        "unit": 0.1,
+        "mode": COND_LIMIT_ORDER,
+        "cond_price": 1000,
+        "price": 1100,
+    }
+    values = \
+        [
+            Decimal(0),  # Init
+            Decimal(800),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
+            Decimal(1100),  # STATE_ADD_ORDER, create_order()
+            Decimal(1100),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
+        ]
+
+    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
+    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
+    sim_socket_manager = client.get_socket_manager()
+
+    # Execution du generator
+    json_generator = {}  # Initial state
+    log = logging.getLogger("TEST")
+    smart_trade = await SmartTrade.create(client,
+                                          engine,
+                                          agent_queue,
+                                          log,
+                                          json_generator,
+                                          generator_name=bot_name,
+                                          client_account=client_account,
+                                          conf=conf,
+                                          )
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_COND_LIMIT_ORDER
+    sim_socket_manager.add_multicast_events(
+        [
+            {
+                "stream": "btcusdt@trade",
+                "data": {
+                    "e": "trade",
+                    "s": "BTCUSDT",
+                    "p": "900"  # 6. Buy
+                }
+            },
+            {
+                "stream": "btcusdt@trade",
+                "data": {
+                    "e": "trade",
+                    "s": "BTCUSDT",
+                    "p": "1000"  # 6. Buy
+                }
+            },
+        ])
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
+    await anext(smart_trade)
+    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ADD_ORDER
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ADD_ORDER_ACCEPTED
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ORDER_CONFIRMED
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
+    await anext(smart_trade)
+    assert smart_trade.buy_order.state == AddOrder.STATE_ORDER_FILLED
+    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
+    await anext(smart_trade)
+    assert smart_trade.is_finished()
+    assert smart_trade.buy_order.order['type'] == ORDER_TYPE_LIMIT
+    assert smart_trade.buy_order.order['quantity'] == Decimal("0.1")
 
 
 async def test_positive_trailing_buy_order_from_market():

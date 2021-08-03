@@ -29,6 +29,9 @@ Il est a noter que les API sont soit pour Spot, soit pour Future, mais pas les d
 
 Il n'y pas de testnet pour Margin.
 
+Interface Testnet future : https://testnet.binancefuture.com/en/futures/BTCUSDT
+
+
 # Démarrage des bots
 Pour pouvoir gérer plusieurs bots en parallèle, le fichier `conf.json`
 permet d'indiquer la fonction async à appliquer pour le robot. 
@@ -56,107 +59,60 @@ On peut en ajouter autant que l'on souhaite.
 ```
 Par défaut, la fonction correspond à la fonction 'bot()' dans le module 'nom_du_boot'.
 
-Il existe deux bots pour diffuser aux autres robots, les évènements des Websockets.
-```
-[
-  {
-    "multiplex_stream": {}
-  },
-  {
-    "user_stream": {}
-  },
-]
-```
-TODO: améliore la diffussion aux robots, les messages, et les cas d'erreurs et de reprise sur les streams.
-
 # Automate
-La bonne façon de coder un bot est de créer un automate à état, qui sauve sont contexte
+La bonne façon de coder un bot est de créer un automate à état, qui sauve son contexte
 régulièrement, a chaque transition. Lors du redémarrage du programme,
 le bot récupère le context. Il sait alors où il en est, et peut reprendre
 le boulot. Parfois, il faut interroger Binance peut se resynchroniser (chercher l'état d'un ordre, etc).
 
 ## Persistance des états
-Les contextes sont généralements sauvés en json. Pour simplifier le code, il est conseiller de créer une classe
+Les contextes sont généralement sauvés en json. Pour simplifier le code, il est conseiller de créer une classe
 permettant un accès via des propriétés, à la place des clés d'un dictionnaire.
+Cela peut se faire simplement en héritant de `BotGenerator`.
 
 ```
-class Ctx(dict):
-    def __init__(self, *args, **kwargs):
-        super(Ctx, self).__init__(*args, **kwargs)
-        self.__dict__ = self
+class MonBot(BotGenerator)
+    async def generator(self,
+                        client: AsyncClient,
+                        engine: 'Engine',
+                        queue: Queue,
+                        log: logging,
+                        init: Dict[str, str],  # Initial context
+                        client_account: Dict[str, Any],
+                        generator_name: str,
+                        conf: Dict[str, Any],
+                        **kwargs) -> None:
 ```
 Au début du bot, le code cherche à lire le contexte.
 S'il n'est pas présent, c'est que le bot démarre pour la première fois. 
-```
-# Conf par défaut
-ctx = Ctx(
-    {
-        "state": STATE_INIT,
-        ...
-    })
-if path.exists():
-    obj, rollback = atomic_load_json(path)
-    ctx = Ctx(obj)
-    if rollback:  # impossible de lire le tous dernier context de l'agent
-        ...
-```
 
 Il faut sauver l'état à chaque modification d'état, pour être capable de reprendre le job.
 ```
-ctx.state = "new_context"
-atomic_save_json(ctx, path)
+atomic_save_json(bot_generator, path)
 ```
 
 
 ## Librairie
-Si ou souhaite faire des librairies avec un sous-automate, il faut utiliser des 
+Si ou souhaite faire des librairies avec des sous-automates, il faut utiliser des 
 générateurs asynchrone. Avec un `yield`, ils retournent le contexte qui doit être sauvé
-dans le contexte du robot. Regardez le code de `filled_order` par exemple.
+dans le contexte du robot. Regardez le code de `add_order` par exemple.
 Ainsi, il est possible de gérer la forte résilience, tout en organisant le code
 en modules réutilisables.
 
 Il est également possible de lancer plusieurs ordres en parallèle, avec différents contextes.
-C'est le robot qui est en charge de sauver son état, et donc, les états des différentes librairies.
+C'est le bot qui se  charge de sauver son état, et donc, les états des différentes librairies.
 Pour faire avance un générateur, 
 ```
-ctx.order_ctx = await current_order.asend(None)
+ctx.order_ctx = await anext(current_order)
 ```
 Il est ensuite possible de consulter l'état du context de la librairie, pour savoir où elle en est.
 ```
 if ctx.order_ctx.state == ...
 ```
 
-## Communication entre bots
-Les différents bots peuvent communiquer entre-eux, via des messages asynchrones.
-Une queue est dispo pour chaque bot, et la liste des bots est livré en paramètre.
-Pour communiquer avec un bot, il faut connaitre son nom.
-```
-agent_queues["bot_name"].put({...})
-```
-
 ## Stream
-Pour récuperer les flux asynchrones de Binance, il faut, au tout début de le bot
-enregistrer une call-back sur les multiplex ou les évenements users.
-
-En générale, une queue locale au bot permet de faciliter le lien entre la call-back
-et l'automate.
-```
-user_queue = asyncio.Queue()  # Queue to receive event from user account
-add_user_socket(lambda msg: user_queue.put_nowait(msg))
-...
-msg = user_queue.get()
-...
-user_queue.task_done()
-```
-pour gérer un time-out pour la récupération du flux:
-```
-    def _get_user_msg():
-        return user_queue.get()
-    msg = await wait_for(_get_user_msg() , timeout=STREAM_MSG_TIMEOUT)
-    ...
-    user_queue.task_done()
-```
-
+La queue `bot_queue` récupère l'ensemble des messages de communications asynchrones,
+avec les messages venant de Binance, et ceux des autres bots.
 
 Comme il n'est pas possible d'ajouter un flux après la création, la stratégie utilisée
 consiste à attendre que tous les agents se soient enregistrée avant de démarrer les flux.
@@ -237,6 +193,10 @@ CTRL-D
 rsync -av -e ssh --exclude='venv' * pi@192.168.0.71:/usr/src/app
 rcp .env pi@192.168.0.71:/usr/src/app
   
+## Mise à jour de Python
+Voir [ici](https://angorange.com/raspberry-pi-installation-de-python-3-9-1)
+et en faire la version par défaut.
+
 # Instalation des dépendences
 ssh pi@192.168.0.71 "cd /usr/src/app && \
 python3 -m venv venv && \
