@@ -9,10 +9,12 @@ from asyncio import Queue, wait_for
 from decimal import Decimal
 from pathlib import Path
 from queue import Empty
+from random import randint
 from typing import Dict, Any
 
 from binance.enums import ORDER_STATUS_FILLED, ORDER_STATUS_NEW, ORDER_STATUS_REJECTED, ORDER_STATUS_EXPIRED, \
-    ORDER_STATUS_PARTIALLY_FILLED
+    ORDER_STATUS_PARTIALLY_FILLED, ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER, ORDER_TYPE_STOP_LOSS, ORDER_TYPE_LIMIT, \
+    ORDER_TYPE_STOP_LOSS_LIMIT, ORDER_TYPE_TAKE_PROFIT, ORDER_TYPE_TAKE_PROFIT_LIMIT
 # TODO: a voir dans streams
 #     MAX_RECONNECTS = 5
 #     MAX_RECONNECT_SECONDS = 60
@@ -25,11 +27,11 @@ import global_flags
 from TypingClient import TypingClient
 from atomic_json import atomic_load_json, atomic_save_json
 from bot_generator import BotGenerator
-from conf import STREAM_MSG_TIMEOUT, CHECK_RESILIENCE
+from conf import STREAM_MSG_TIMEOUT
 from shared_time import get_now
 from simulate_client import EndOfDatas
 from tools import update_wallet, get_order_price, log_add_order, anext, log_wallet, generate_order_id, \
-    wallet_from_symbol
+    wallet_from_symbol, remove_exponent
 
 
 class AddOrder(BotGenerator):
@@ -37,6 +39,7 @@ class AddOrder(BotGenerator):
 
     STATE_INIT = "init"
     STATE_ADD_ORDER = "add_order"
+    STATE_ADD_PARTIALLY_ORDER = "add_partially_order"
     STATE_ADD_ORDER_ACCEPTED = "add_order_accepted"
     STATE_RETRY_ADD_ORDER = "retry_add_order"
     STATE_WAIT_ORDER = "wait_order"
@@ -64,12 +67,11 @@ class AddOrder(BotGenerator):
             return Decimal(self.order['quantity'])
 
     def is_filled(self, accept_partial=False):
-        return self.state in (AddOrder.STATE_ORDER_FILLED,AddOrder.STATE_FINISHED) or accept_partial \
+        return self.state in (AddOrder.STATE_ORDER_FILLED, AddOrder.STATE_FINISHED) or accept_partial \
                and self.state == AddOrder.STATE_ORDER_PARTIALLY_FILLED
 
-    # FIXME
-    # def is_partially_filled(self):
-    #     return self.state == AddOrder.STATE_ORDER_FILLED
+    def is_partially_filled(self):
+        return self.state == AddOrder.STATE_ORDER_FILLED and self.order["state"] == ORDER_STATUS_PARTIALLY_FILLED
 
     def is_waiting(self):
         return self.state == AddOrder.STATE_WAIT_ORDER_FILLED_WITH_POLLING
@@ -80,7 +82,7 @@ class AddOrder(BotGenerator):
         if self.state == AddOrder.STATE_ADD_ORDER:
             self.previous_state = self.state
             self.state = AddOrder.STATE_CANCELED
-        elif self.state not in (AddOrder.STATE_ORDER_FILLED,AddOrder.STATE_FINISHED,BotGenerator.STATE_FINISHED):
+        elif self.state not in (AddOrder.STATE_ORDER_FILLED, AddOrder.STATE_FINISHED, BotGenerator.STATE_FINISHED):
             self.previous_state = self.state
             self.state = AddOrder.STATE_CANCELING
 
@@ -94,6 +96,7 @@ class AddOrder(BotGenerator):
                         log: logging,
                         init: Dict[str, str],
                         **kwargs):
+
         if not init:
             now = get_now()
             init = {
@@ -103,7 +106,10 @@ class AddOrder(BotGenerator):
                 "running": True,
                 "state": AddOrder.STATE_INIT,
                 "order": kwargs['order'],
-                "newClientOrderId": kwargs['order'].get("newClientOrderId",generate_order_id("AddOrder"))
+                "partially_order": None,
+                "partially_qty": Decimal("0"),
+                "partially_tx": Decimal("0"),
+                "newClientOrderId": kwargs['order'].get("newClientOrderId", generate_order_id("AddOrder"))
             }
         else:
             log.info(f"Restart with state={init['state']}")
@@ -117,7 +123,7 @@ class AddOrder(BotGenerator):
         prefix = kwargs.get('prefix', '')  # Prefix pour les logs
 
         wallet: Dict[str, Decimal] = kwargs['wallet']
-        self.continue_if_partially: bool = kwargs.get("continue_if_partially")  # FIXME
+        self.continue_if_partially: bool = kwargs.get("continue_if_partially")
         # Resynchronise l'état sauvegardé
         if self.state in (AddOrder.STATE_ORDER_CONFIRMED, AddOrder.STATE_WAIT_ORDER_FILLED_WITH_WEB_SOCKET):
             # Si on démarre, il y a le risque d'avoir perdu le message de validation du trade en cours
@@ -137,30 +143,31 @@ class AddOrder(BotGenerator):
             elif self.state == AddOrder.STATE_RETRY_ADD_ORDER:
                 # Detection de doublon, via newClientOrderId
                 if "newClientOrderId" in self.order:
-                    orders=await client.get_all_orders(symbol=self.order['symbol'],limit=100)
-                    order_id=self.order["newClientOrderId"]
-                    orders=list(filter(lambda x: x['clientOrderId'] == order_id, orders))
+                    orders = await client.get_all_orders(symbol=self.order['symbol'], limit=100)
+                    order_id = self.order["newClientOrderId"]
+                    orders = list(filter(lambda x: x['clientOrderId'] == order_id, orders))
                     if orders:
-                        self.new_order=orders[0]
+                        self.new_order = orders[0]
                         self.state = AddOrder.STATE_ADD_ORDER_ACCEPTED
                         yield self
                         continue
                 else:
-                    await engine.send_telegram(log,"Impossible to detect a duplicate order. May be duplicate.")
+                    await engine.send_telegram(log, "Impossible to detect a duplicate order. May be duplicate.")
                 # Pas de doublon, ou détection impossible
                 self.state = AddOrder.STATE_ADD_ORDER
-            elif self.state == AddOrder.STATE_ADD_ORDER:
+            elif self.state in (AddOrder.STATE_ADD_ORDER, AddOrder.STATE_ADD_PARTIALLY_ORDER):
                 try:
                     # Prépare la création d'un ordre
-                    await client.create_test_order(**self.order)
+                    order = self.partially_order if self.partially_order else self.order
+                    await client.create_test_order(**order)
                     # Puis essaye de l'executer
-                    log.debug(f"Push {self.order}")
-                    self.new_order = await client.create_order(**self.order)
+                    log.debug(f"Push   {order}")
+                    self.new_order = await client.create_order(**order)
                     log.debug(f"Pushed {self.new_order}")
                     if self.new_order["status"] == ORDER_STATUS_FILLED:
                         update_wallet(wallet, self.new_order)
                         await engine.log_order(log, self.new_order, prefix + " ****** ")
-                        self.order=self.new_order
+                        self.order = self.new_order
                         self.state = AddOrder.STATE_ORDER_FILLED
                 except BinanceAPIException as ex:
                     if ex.code == -2010:  # Duplicate order sent ?, ignore
@@ -193,7 +200,7 @@ class AddOrder(BotGenerator):
                     else:
                         raise
                 if self.new_order["status"] != ORDER_STATUS_FILLED:
-                    self.state =AddOrder.STATE_ADD_ORDER_ACCEPTED
+                    self.state = AddOrder.STATE_ADD_ORDER_ACCEPTED
                 yield self
 
             elif self.state == AddOrder.STATE_ADD_ORDER_ACCEPTED:
@@ -210,6 +217,7 @@ class AddOrder(BotGenerator):
                     new_order["quantity"] = self.order["quantity"]
                 log_add_order(log, self.order, prefix + " Try to ")
                 self._order = self.order  # Pour le retry
+                self.original_order = self.order
                 self.order = new_order
                 self.state = AddOrder.STATE_ORDER_CONFIRMED
                 yield self
@@ -222,7 +230,7 @@ class AddOrder(BotGenerator):
                 # Attend en websocket
                 try:
 
-                    log.debug("Wait events...")
+                    # log.debug("Wait events...")
                     # FIXME: incompatible avec plusieurs ordres en meme temps
                     msg = await wait_for(_get_msg(), timeout=STREAM_MSG_TIMEOUT)
                     # See https://github.com/binance/binance-spot-api-docs/blob/master/user-data-stream.md
@@ -257,22 +265,85 @@ class AddOrder(BotGenerator):
                         update_wallet(wallet, new_order)
                         await engine.log_order(log, new_order, prefix + " ****** ")
                         del self._order
+                        if self.partially_order:
+                            # Création d'un resultat simulé, basé sur l'accumulation des partially_filled
+                            self.partially_qty += Decimal(new_order["executedQty"])
+                            self.partially_tx += get_order_price(new_order) * Decimal(new_order["executedQty"])
+                            new_order["executedQty"] = remove_exponent(self.partially_qty)
+                            new_order["price"] = remove_exponent(self.partially_tx / self.partially_qty)
+                            new_order["state"] = ORDER_STATUS_FILLED
                         self.order = new_order
                         self.state = AddOrder.STATE_ORDER_FILLED
                         yield self
-                    elif new_order['status'] == ORDER_STATUS_PARTIALLY_FILLED:  # or ORDER_STATUS_PARTIALLY_FILLED
-                        # FIXME: Partially a traiter
+                    elif new_order['status'] == ORDER_STATUS_PARTIALLY_FILLED:
                         await engine.log_order(log, new_order)
                         update_wallet(wallet, new_order)
                         await engine.log_order(log, new_order, prefix)
                         if not self.continue_if_partially:
-                            await engine.send_telegram(log,"PARTIALLY")
+                            await engine.send_telegram(
+                                log,
+                                f"Order {self.order['clientOrderId']} partially executed")
                             del self._order
                             self.order = new_order
                             self.state = AddOrder.STATE_ORDER_FILLED
                         else:
-                            # FIXME: Partially
-                            pass
+                            self.partially_qty += Decimal(new_order["executedQty"])
+                            self.partially_tx += get_order_price(new_order) * Decimal(new_order["executedQty"])
+                            await engine.send_telegram(
+                                log,
+                                f"Order {self.order['clientOrderId']} partially executed, but continue")
+                            diff = Decimal(new_order['origQty']) - Decimal(new_order['executedQty'])
+                            partially_order = \
+                                {k: self.order[k] for k in self.order.keys() & {'symbol', 'side', 'type'}}
+                            if partially_order["type"] == ORDER_TYPE_LIMIT:
+                                partially_order = \
+                                    {**partially_order,
+                                     **{k: self.order[k] for k in self.order.keys() & {'timeInForce', 'price'}}}
+                            elif partially_order["type"] == ORDER_TYPE_MARKET:
+                                partially_order = \
+                                    {**partially_order,
+                                     **{k: self.order[k] for k in
+                                        self.order.keys() & {'quoteOrderQty'}}}
+                            elif partially_order["type"] == ORDER_TYPE_STOP_LOSS:
+                                partially_order = \
+                                    {**partially_order, **{k: self.order[k] for k in self.order.keys() & {'stopPrice'}}}
+                            elif partially_order["type"] == ORDER_TYPE_STOP_LOSS_LIMIT:
+                                partially_order = \
+                                    {**partially_order, **{k: self.order[k] for k in
+                                                           self.order.keys() & {'timeInForce', 'price', 'stopPrice'}}}
+                            elif partially_order["type"] == ORDER_TYPE_TAKE_PROFIT:
+                                partially_order = \
+                                    {**partially_order, **{k: self.order[k] for k in self.order.keys() & {'stopPrice'}}}
+                            elif partially_order["type"] == ORDER_TYPE_TAKE_PROFIT_LIMIT:
+                                partially_order = \
+                                    {**partially_order, **{k: self.order[k] for k in
+                                                           self.order.keys() & {'timeInForce', 'price', 'stopPrice'}}}
+                            elif partially_order["type"] == ORDER_TYPE_LIMIT_MAKER:
+                                partially_order = \
+                                    {**partially_order,
+                                     **{k: self.order[k] for k in self.order.keys() & {'quantity', 'price'}}}
+
+                            partially_order["newClientOrderId"] = self.newClientOrderId + "-" + str(randint(0, 100))
+                            if "quoteOrderQty" in self._order:
+                                # Ajuste la quantity de quote
+                                partially_order["quoteOrderQty"] = remove_exponent(
+                                    Decimal(self._order["quoteOrderQty"]) - self.partially_tx)
+                            else:
+                                partially_order["quantity"] = remove_exponent(diff)
+                            try:
+                                await client.create_test_order(**partially_order)
+                                self.partially_order = partially_order
+                                self._order = partially_order  # Pour le retry
+                                self.state = AddOrder.STATE_ADD_PARTIALLY_ORDER
+                            except BinanceAPIException as ex:
+                                if ex.message.startswith("Filter failure:"):
+                                    # Can not continue, it's finish
+                                    del self._order
+                                    self.order = new_order
+                                    self.state = AddOrder.STATE_ORDER_FILLED
+                                else:
+                                    raise
+
                         yield self
                     elif new_order['status'] == ORDER_STATUS_REJECTED:
                         log.error(f'Order {new_order["orderId"]} is rejected')
@@ -281,7 +352,8 @@ class AddOrder(BotGenerator):
                         self.state = AddOrder.STATE_ERROR
                         yield self
                     elif new_order['status'] == ORDER_STATUS_EXPIRED:
-                        await engine.send_telegram(log,
+                        await engine.send_telegram(
+                            log,
                             f'Order {new_order["orderId"]} is expired ({new_order["clientOrderId"]}. Retry')  # FIXME
                         self.order = self._order
                         del self._order
@@ -295,7 +367,7 @@ class AddOrder(BotGenerator):
                         assert False, f"Unknown status {new_order['status']}"
                 except BinanceAPIException as ex:
                     if ex.code == -2013 and ex.message.startswith("Order does not exist."):
-                        await engine.send_telegram(log,"Order does not exist. Retry.")
+                        await engine.send_telegram(log, "Order does not exist. Retry.")
                         self.state = AddOrder.STATE_ADD_ORDER
                         yield self
                     else:
@@ -305,14 +377,14 @@ class AddOrder(BotGenerator):
                 self.state = AddOrder.STATE_FINISHED
                 yield self
             elif self.state == AddOrder.STATE_FINISHED:
-                self.running=False
+                self.running = False
                 return
             elif self.state == AddOrder.STATE_CANCELING:
                 try:
                     assert self.order['status']
                     if self.order["status"] == ORDER_STATUS_NEW:
                         assert self.order['orderId']
-                        await engine.send_telegram(log,f"Cancel order {self.order['clientOrderId']}")
+                        await engine.send_telegram(log, f"Cancel order {self.order['clientOrderId']}")
                         await client.cancel_order(symbol=self.order['symbol'], orderId=self.order['orderId'])
                         self.state = AddOrder.STATE_CANCELED
                     else:
@@ -327,7 +399,7 @@ class AddOrder(BotGenerator):
 
                 yield self
             elif self.state == AddOrder.STATE_CANCELED:
-                self.running=False
+                self.running = False
                 return
             else:
                 log.error(f'Unknown state \'{self["state"]}\'')

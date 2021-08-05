@@ -444,7 +444,7 @@ class SmartTrade(BotGenerator):
                         log,
                         order=order,
                         wallet=self.wallet,
-                        continue_if_partially=False
+                        continue_if_partially=True
                     )
                     self.state = SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
                     yield self
@@ -491,7 +491,7 @@ class SmartTrade(BotGenerator):
                                     log.info(
                                         f"Set TSL condition to {self.active_stop_loss_condition:+} ({percent * 100:+}% / "
                                         f"{remove_exponent(-(self.buy_order.price * self.buy_order.quantity * -percent)):+} "
-                                        f"{squote}) ({params.stop_loss_base})")
+                                        f"{squote} / {params.stop_loss_base})")
                                 else:
                                     log.info(
                                         f"Set SL condition to {self.active_stop_loss_condition:+} "
@@ -507,8 +507,8 @@ class SmartTrade(BotGenerator):
                                 self.mtp_start_delay = None
                                 log.info(
                                     f"Set MTP trigger condition to "
-                                    f"{self.mtp_target:+} {squote} ({remove_exponent(params.minimal * 100):+}%)"
-                                    f" ({params.take_profit_base})")
+                                    f"{self.mtp_target:+} {squote} ({remove_exponent(params.minimal * 100):+}% /"
+                                    f" {params.take_profit_base})")
                             if not params.take_profit_trailing \
                                     and not params.minimal \
                                     and not params.use_stop_loss \
@@ -598,7 +598,7 @@ class SmartTrade(BotGenerator):
                         log,
                         order=order,
                         wallet=self.wallet,
-                        continue_if_partially=False
+                        continue_if_partially=True
                     )
                     self.state = SmartTrade.STATE_WAIT_TP_FILLED
                     yield self
@@ -641,7 +641,7 @@ class SmartTrade(BotGenerator):
                                 log,
                                 order=order,
                                 wallet=self.wallet,
-                                continue_if_partially=False
+                                continue_if_partially=True
                             )
                             await engine.send_telegram(log, "Re push order with MARKET price")
                     self.state = SmartTrade.STATE_WAIT_TP_FILLED
@@ -694,7 +694,7 @@ class SmartTrade(BotGenerator):
                         log,
                         order=order,
                         wallet=self.wallet,
-                        continue_if_partially=False
+                        continue_if_partially=True
                     )
                     self.state = SmartTrade.STATE_WAIT_SL_FILLED
                     yield self
@@ -739,7 +739,7 @@ class SmartTrade(BotGenerator):
                                 log,
                                 order=order,
                                 wallet=self.wallet,
-                                continue_if_partially=False
+                                continue_if_partially=True
                             )
                             await engine.send_telegram(log, "Re push SL order with MARKET price")
                     self.state = SmartTrade.STATE_WAIT_SL_FILLED
@@ -799,7 +799,7 @@ class SmartTrade(BotGenerator):
                         log,
                         order=order,
                         wallet=self.wallet,
-                        continue_if_partially=False,
+                        continue_if_partially=True,
                         prefix=prefix
                     )
                     self.state = SmartTrade.STATE_WAIT_SL_FILLED
@@ -836,7 +836,7 @@ class SmartTrade(BotGenerator):
                         log,
                         order=order,
                         wallet=self.wallet,
-                        continue_if_partially=False,
+                        continue_if_partially=True,
                         prefix="TAKE PROFIT:"
                     )
                     self.state = SmartTrade.STATE_WAIT_TP_FILLED
