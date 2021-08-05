@@ -1687,8 +1687,8 @@ async def test_simple_order_at_market_tp_last_limit_trailing_positif():
     assert smart_trade.active_take_profit_trailing
 
 
-async def test_simple_order_at_market_min_tp_activate():
-    """ Test le passage d'un ordre simple, avec TP simple sur ask """
+async def test_simple_order_at_market_mtp_activate():
+    """ Test le passage d'un ordre simple, avec MTP activé """
     # Dont générer un order TP
     conf = {
         "symbol": "BTCUSDT",
@@ -1786,30 +1786,30 @@ async def test_simple_order_at_market_min_tp_activate():
     ])
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert not smart_trade.activate_min_tp
-    assert smart_trade.min_tp_target == Decimal("1005")
+    assert not smart_trade.mtp_triggered
+    assert not smart_trade.mtp_activated
+    assert not smart_trade.mtp_start_delay
+    assert smart_trade.mtp_target == Decimal("1005")
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
+    assert not smart_trade.mtp_triggered
+    assert not smart_trade.mtp_activated
+    assert smart_trade.mtp_start_delay
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
-    await anext(smart_trade)
+    assert not smart_trade.mtp_triggered
+    assert not smart_trade.mtp_activated
+    assert smart_trade.mtp_start_delay
+    await anext(smart_trade)  # Active le MTP
     assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
+    assert smart_trade.mtp_triggered
+    assert not smart_trade.mtp_activated
+    assert smart_trade.mtp_start_delay
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
-    assert smart_trade.min_tp_triggered
-    assert smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
+    assert smart_trade.mtp_triggered
+    assert smart_trade.mtp_activated
+    assert smart_trade.mtp_start_delay
     await anext(smart_trade)  # Active MinTP
     assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
     await anext(smart_trade)  # INIT
@@ -1821,177 +1821,10 @@ async def test_simple_order_at_market_min_tp_activate():
     assert smart_trade.is_finished()
     assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_MARKET
     assert smart_trade.take_profit_order.order['price'] == Decimal("1007")
-    assert smart_trade.min_tp_activated
+    assert smart_trade.mtp_activated
 
 
-async def test_simple_order_trailing_min_tp_activate():
-    """ Test le passage d'un ordre simple, avec TP trailing, et min ajusté """
-    # Dont générer un order TP
-    conf = {
-        "symbol": "BTCUSDT",
-        "unit": 0.1,
-        "mode": "MARKET",
-        "take_profit": {
-            "base": "ask",
-            "mode": "MARKET",
-            "price": "1%",
-            "trailing": "-0.05%",
-            "minimal": "0.5%",
-            "timeout": 1,
-            "trailing_minimal": True,
-        }
-    }
-    values = \
-        [
-            Decimal(0),  # Init
-            Decimal(1000),  # STATE_CREATE_BUY_ORDER, get market
-            Decimal(1000),  # STATE_ADD_ORDER, create_order()
-            Decimal(1000),  # STATE_WAIT_ORDER_FILLED_WITH_POLLING, get_order()
-            Decimal(1007),  # Take profit
-            Decimal(1000),  #
-        ]
-    # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
-    engine, agent_queue, bot_name, client, client_account, conf, event_queues = await init_test(conf, values)
-    # Execution du generator
-    json_generator = {}  # Initial state
-    log = logging.getLogger("TEST")
-    smart_trade = await SmartTrade.create(client,
-                                          engine,
-                                          agent_queue,
-                                          log,
-                                          json_generator,
-                                          generator_name=bot_name,
-                                          client_account=client_account,
-                                          conf=conf,
-                                          )
-    await anext(smart_trade)
-    assert smart_trade.state == SmartTrade.STATE_CREATE_BUY_ORDER
-    await anext(smart_trade)
-    assert smart_trade.state == SmartTrade.STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # INIT
-    await anext(smart_trade)  # ADD_ORDER_ACCEPTED
-    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
-    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
-    assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
-    await anext(smart_trade)
-    assert smart_trade.state == SmartTrade.STATE_TRAILING
-    client.get_socket_manager().add_multicast_events([
-        {
-            "stream": "btcusdt@bookTicker",
-            "data": {
-                "e": "trade",
-                "s": "BTCUSDT",
-                "b": "900",
-                "a": "1000"  # 3. Pas encore
-            }
-        },
-        {
-            "stream": "btcusdt@bookTicker",
-            "data": {
-                "e": "trade",
-                "s": "BTCUSDT",
-                "b": "900",
-                "a": "1005"  # 4. Le Min TP s'active
-            }
-        },
-        {
-            "stream": "btcusdt@bookTicker",
-            "data": {
-                "e": "trade",
-                "s": "BTCUSDT",
-                "b": "900",
-                "a": "1006"  # 5. Le Min TP est confirmé
-            }
-        },
-        {
-            "stream": "btcusdt@bookTicker",
-            "data": {
-                "e": "trade",
-                "s": "BTCUSDT",
-                "b": "900",
-                "a": "1006"  # 6. Le Min TP est confirmé
-            }
-        },
-        {
-            "stream": "btcusdt@bookTicker",
-            "data": {
-                "e": "trade",
-                "s": "BTCUSDT",
-                "b": "900",
-                "a": "1010"  # 7. Le trailing TP s'ajuste
-            }
-        },
-        {
-            "stream": "btcusdt@bookTicker",
-            "data": {
-                "e": "trade",
-                "s": "BTCUSDT",
-                "b": "900",
-                "a": "1100"  # 8. Achat par TP simple
-            }
-        },
-        {
-            "stream": "btcusdt@bookTicker",
-            "data": {
-                "e": "trade",
-                "s": "BTCUSDT",
-                "b": "900",
-                "a": "1095"  # 9. Puis on achete
-            }
-        }
-    ])
-    await anext(smart_trade)
-    assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert not smart_trade.activate_min_tp
-    assert smart_trade.min_tp_target == Decimal("1005")
-    await anext(smart_trade)
-    assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
-    await anext(smart_trade)
-    assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
-    await anext(smart_trade)
-    assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
-    await anext(smart_trade)
-    assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
-    assert smart_trade.active_take_profit_trailing
-    await anext(smart_trade)  # Active MinTP
-    assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert smart_trade.min_tp_target == Decimal("1094.955")  # Ajustement du Min-TP
-    assert smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
-    await anext(smart_trade)  # Active MinTP
-    assert smart_trade.state == SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
-    assert not smart_trade.min_tp_activated  # Activé, mais pas à cause du Min-TP
-    await anext(smart_trade)
-    assert smart_trade.state == SmartTrade.STATE_WAIT_TP_FILLED
-    await anext(smart_trade)  # INIT
-    await anext(smart_trade)  # STATE_ADD_ORDER
-    await anext(smart_trade)  # STATE_WAIT_ADD_ORDER_FILLED
-    await anext(smart_trade)  # STATE_ORDER_CONFIRMED
-    await anext(smart_trade)  # STATE_WAIT_ORDER_FILLED_WITH_POLLING
-    await anext(smart_trade)  # FINISH
-    assert smart_trade.is_finished()
-    assert smart_trade.take_profit_order.order['type'] == ORDER_TYPE_MARKET
-    assert smart_trade.take_profit_order.order['price'] == Decimal("1007")
-    assert not smart_trade.min_tp_activated
-
-
-async def test_simple_order_at_market_min_tp_no_activate():
+async def test_simple_order_at_market_mtp_no_activate():
     """ Test le passage d'un ordre simple, avec TP simple sur ask """
     # Dont générer un order TP
     conf = {
@@ -2046,10 +1879,10 @@ async def test_simple_order_at_market_min_tp_no_activate():
     assert smart_trade.state == SmartTrade.STATE_BUY_ORDER_FILLED
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert not smart_trade.activate_min_tp
-    assert smart_trade.min_tp_target == Decimal("1005")
+    assert not smart_trade.mtp_triggered
+    assert not smart_trade.mtp_activated
+    assert not smart_trade.mtp_start_delay
+    assert smart_trade.mtp_target == Decimal("1005")
     client.get_socket_manager().add_multicast_events([
         {
             "stream": "btcusdt@bookTicker",
@@ -2099,24 +1932,24 @@ async def test_simple_order_at_market_min_tp_no_activate():
     ])
     await anext(smart_trade)
     assert smart_trade.state == SmartTrade.STATE_TRAILING
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert not smart_trade.activate_min_tp
-    assert smart_trade.min_tp_target == Decimal("1005")
+    assert not smart_trade.mtp_triggered
+    assert not smart_trade.mtp_activated
+    assert not smart_trade.mtp_start_delay
+    assert smart_trade.mtp_target == Decimal("1005")
     await anext(smart_trade)
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp
+    assert not smart_trade.mtp_triggered
+    assert not smart_trade.mtp_activated
+    assert smart_trade.mtp_start_delay
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     await anext(smart_trade)
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert smart_trade.activate_min_tp  # Peux-etre...
+    assert not smart_trade.mtp_triggered
+    assert not smart_trade.mtp_activated
+    assert smart_trade.mtp_start_delay  # Peux-etre...
     assert smart_trade.state == SmartTrade.STATE_TRAILING
     await anext(smart_trade)
-    assert not smart_trade.min_tp_triggered
-    assert not smart_trade.min_tp_activated
-    assert not smart_trade.activate_min_tp  # Peux-etre...
+    assert not smart_trade.mtp_triggered
+    assert not smart_trade.mtp_activated
+    assert not smart_trade.mtp_start_delay  # Peux-etre...
     assert smart_trade.state == SmartTrade.STATE_TRAILING
 
 

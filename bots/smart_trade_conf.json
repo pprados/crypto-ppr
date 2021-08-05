@@ -58,10 +58,7 @@
 
     // Take profit minimum, si le cours remonte pendant 'timeout', alors le SL est remplacé par ce niveau de TP
     "minimal" : "2%",
-    // Suit le prix montant pour ajuster le Min-TP ? (Risque de vendre plus rapidement, avant d'arriver au TP
-    // cela peut etre compensé par une durée plus longue, pour s'assurer de la montée
-    "trailing_minimal": false,
-    // Délai pour confirmer un minimal-TP en seconde
+    // Délai pour confirmer l'activation d'un MTP en seconde
     "timeout": 2,
   },
 
@@ -70,11 +67,10 @@
     // Le signal d'activation est sur une 'base' (ask préconisé)
     "base": "ask",         // bid, *ask* , last (securisé via pre-ordre)
 
+    "mode": "MARKET",
     // "MARKET": vend au marché
     // "COND_LIMIT_ORDER" : attend une condition pour vendre à la limite
-    "mode": "MARKET",
-
-    // *"MARKET"* ou "LIMIT" ou un pourcentage par rapport au trigger.
+    // FIXME *"MARKET"* ou "LIMIT" ou un pourcentage par rapport au trigger.
     // Lorsque l'on vend pour un TP, ordre au MARKET ou limit sur le trigger * percent ?
     // Généralement negatif.
     "mode_sell": "-0.5%",
@@ -88,7 +84,7 @@
 
     // Le signal d'une baisse peut etre confirmé pendant un certain délai en seconde.
     // Le signal ne doit pas remonter pendant cette période.
-    "timeout": 2,
+    "timeout": 60,
 
     // Il es possible d'apprendre de la baisse pour remontrer progressivement le SL
     // au fur et à mesure de la monté du cours.

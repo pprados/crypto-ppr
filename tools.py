@@ -350,7 +350,7 @@ def log_add_order(log: logging, order: Dict[str, Any], prefix=None):
 
 
 def log_wallet(log: logging, wallet: Wallet, prefix="wallet:") -> None:
-    log.info(prefix + " ".join([f"{k}={v}" for k, v in wallet.items()]))
+    log.info(prefix + " ".join([f"{k}:{v:+}" for k, v in wallet.items()]))
 
 
 def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:

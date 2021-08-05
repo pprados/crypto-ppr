@@ -100,7 +100,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
         assert not params.minimal or params.minimal > 0
         if params.minimal:
             params.minimal_timeout = take_profit_conf['timeout']
-        params.minimal_trailing = take_profit_conf.get('trailing_minimal')
+        params.mtp_trailing = take_profit_conf.get('trailing_minimal')
 
     # STOP LOST
     params.use_stop_loss = "stop_loss" in conf

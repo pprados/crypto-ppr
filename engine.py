@@ -19,7 +19,7 @@ from atomic_json import atomic_load_json, atomic_save_json
 from conf import MIN_RECONNECT_WAIT, SLIPPING_TIME, NO_TELEGRAM
 from events_queues import EventQueues
 from simulate_client import SimulateFixedValues
-from tools import generate_bot_id, log_wallet, _str_dump_order
+from tools import generate_bot_id, log_wallet, _str_dump_order, remove_exponent
 
 
 class EngineMsg(Enum):
@@ -79,13 +79,14 @@ class Engine:
         if not NO_TELEGRAM:
             await self._telegram.send_message(TELEGRAM_PHONE, message)
 
-    async def log_order(self, log, order: Dict[str, Any], prefix:str ="****** ",suffix: str = ''):
-        await self.send_telegram(log,_str_dump_order(order, prefix, suffix))
+    async def log_order(self, log, order: Dict[str, Any], prefix: str = "****** ", suffix: str = ''):
+        await self.send_telegram(log, _str_dump_order(order, prefix, suffix))
 
     async def log_result(self, log, wallet: Dict[str, Decimal], initial_wallet: Dict[str, Decimal]):
-        diff = {k: float(v - initial_wallet[k]) for k, v in wallet.items()}
-        message = f"###### Result: {diff}"
-        await self.send_telegram(log,message)
+        log_wallet(log,wallet,"Wallet:")
+        diff = [f"{k}:{remove_exponent(v - initial_wallet[k]):+}" for k, v in wallet.items()]
+        message = f"###### Result: {', '.join(diff)}"
+        await self.send_telegram(log, message)
 
     def __del(self):
         self._engine_thread.cancel()
@@ -261,8 +262,10 @@ class Engine:
                 self.event_queues.add_streams(
                     [
                         # "btcusdt@aggTrade",
-                        "btcusdt@trade",
-                        "btcusdt@bookTicker"
+                        "btcusdt@trade",  # FIXME: rendre paramétrable
+                        "btcusdt@bookTicker",
+                        # "ethusdt@trade",
+                        # "ethusdt@bookTicker",
                     ])
                 self.client = client  # Commit the initialization
 

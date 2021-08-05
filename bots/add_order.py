@@ -154,9 +154,9 @@ class AddOrder(BotGenerator):
                     # Prépare la création d'un ordre
                     await client.create_test_order(**self.order)
                     # Puis essaye de l'executer
-                    log.info(f"--- Push order {self.order}")
+                    log.debug(f"Push {self.order}")
                     self.new_order = await client.create_order(**self.order)
-                    log.info(f"--- Order pushed {self.new_order}")
+                    log.debug(f"Pushed {self.new_order}")
                     if self.new_order["status"] == ORDER_STATUS_FILLED:
                         update_wallet(wallet, self.new_order)
                         await engine.log_order(log, self.new_order, prefix + " ****** ")

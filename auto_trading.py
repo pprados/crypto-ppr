@@ -127,6 +127,9 @@ def init(path: Optional[Path], simulate: bool):
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+    logging.getLogger("binance.streams").setLevel(logging.INFO)
+    logging.getLogger("asyncio").setLevel(logging.INFO)
+    logging.getLogger("websockets").setLevel(logging.INFO)
 
     # TODO: Voir http://www.uvicorn.org/ pour paramétrer les logs
     # TODO: https://docs.gunicorn.org/en/latest/settings.html#logging
