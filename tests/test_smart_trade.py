@@ -5,15 +5,15 @@ from decimal import Decimal
 from unittest.mock import patch, MagicMock
 
 import pytest
-from binance.enums import ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET, ORDER_TYPE_TAKE_PROFIT_LIMIT, ORDER_TYPE_STOP_LOSS_LIMIT
 
 import global_flags
 from api_key import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TEST_NET
 from auto_trading import engine_path
+from binance.enums import ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET, ORDER_TYPE_TAKE_PROFIT_LIMIT, ORDER_TYPE_STOP_LOSS_LIMIT
 from bots.add_order import AddOrder
 from bots.smart_trade import SmartTrade
 from bots.smart_trades_conf import COND_MARKET_ORDER, COND_LIMIT_ORDER
-from conf import NO_TELEGRAM
+from conf import TELEGRAM
 from engine import Engine
 from events_queues import EventQueues
 from simulate_client import TestBinanceClient, AbstractSimulateValue, _SimulateUserSocket
@@ -35,7 +35,7 @@ class AsyncMock(MagicMock):
 def run_before_and_after_tests(tmpdir):
     """Fixture to execute asserts before and after a test is run"""
     # Setup: fill with any logic you want
-    assert NO_TELEGRAM, "Set NO_TELEGRAM=True"
+    assert not TELEGRAM, "Set TELEGRAM=False"
     yield  # this is where the testing happens
     # Teardown : fill with any logic you want
 
@@ -217,7 +217,7 @@ async def test_simple_order_with_with_poll(mock_recv_method):
     """ Test le passage d'un ordre simple, sans trailing, validé par poll """
 
     async def mock_recv():
-        sleep(10)
+        await sleep(10)
         raise ValueError()
 
     mock_recv_method.side_effect = mock_recv

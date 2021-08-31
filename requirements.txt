@@ -1,7 +1,7 @@
 cython
 click
 click_pathlib
-python-binance
+-e python-binance
 #git+https://github.com/pprados/python-binance.git
 jstyleson
 python-dotenv

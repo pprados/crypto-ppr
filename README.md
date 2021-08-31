@@ -3,12 +3,12 @@ Ce projet perso, cherche à permettre le trading automatique par des robots cod�
 Avec un processus qui tourne sur un raspberry, un docker ou une VM, il faut pouvoir 
 executer des bots variées, codées en Python.
 
-La difficulté majeur est que ces derniers doivent être *super résiliente*. C'est
-à dire qu'il faut coder de tel manière qu'un crash à tout moment, ne plante pas les
+La difficulté majeure est que ces derniers doivent être *super résiliente*. C'est-à-dire 
+qu'il faut coder de telle manière qu'un crash à tout moment, ne plante pas les
 bots. On doit pouvoir couper le courant à tout moment, sans impact.
 
 Pour faire cela, chaque action doit être inscrite avant d'être exécutée.
-En cas de plantage, au redemarrage du programme, il faut re-synchroniser le robot
+En cas de plantage, au redémarrage du programme, il faut re-synchroniser le robot
 pour reprendre le job là ou il s'est arreté.
 
 Par exemple, pour créer un ordre, l'API Binance peut être invoqué. Mais, rien ne
@@ -25,39 +25,26 @@ BINANCE_API_KEY=...
 BINANCE_API_SECRET=...
 BINANCE_API_TEST=true
 ```
-Il est a noter que les API sont soit pour Spot, soit pour Future, mais pas les deux.
+Il est à noter que les API sont soit pour Spot, soit pour Future, mais pas les deux.
 
-Il n'y pas de testnet pour Margin.
+Il ne semble pas y avoir testnet pour Margin ? A confirmer
 
 Interface Testnet future : https://testnet.binancefuture.com/en/futures/BTCUSDT
 
 
 # Démarrage des bots
 Pour pouvoir gérer plusieurs bots en parallèle, le fichier `conf.json`
-permet d'indiquer la fonction async à appliquer pour le robot. 
-On peut en ajouter autant que l'on souhaite.
+permet d'indiquer les bots à lancer. 
+On peut en ajouter autant que l'on souhaite, avec des noms différents
 ```
 [
   {
-    "long_strategy": { # Nom du bot
-      ... # Paramètre du robot
-    }
-  },
-  {
-    "smart_trade_1": { # Nom du bot
-      "function": "smart_trade" # Optionel: Nom du module python avec la fonction bot()
-      ... # Paramètre du robot
-    }
-  },
-  {
-    "smart_trade_2": { # Nom du bot
-      "function": "smart_trade.bot" # Optionel: nom de la fonction à invoquer pour démarrer le robot
-      ... # Paramètre du robot
+    "infinite": {
+    ...
     }
   }
 ]
 ```
-Par défaut, la fonction correspond à la fonction 'bot()' dans le module 'nom_du_boot'.
 
 # Automate
 La bonne façon de coder un bot est de créer un automate à état, qui sauve son contexte
@@ -93,14 +80,14 @@ atomic_save_json(bot_generator, path)
 
 
 ## Librairie
-Si ou souhaite faire des librairies avec des sous-automates, il faut utiliser des 
+Si on souhaite faire des librairies avec des sous-automates, il faut utiliser des 
 générateurs asynchrone. Avec un `yield`, ils retournent le contexte qui doit être sauvé
 dans le contexte du robot. Regardez le code de `add_order` par exemple.
 Ainsi, il est possible de gérer la forte résilience, tout en organisant le code
 en modules réutilisables.
 
 Il est également possible de lancer plusieurs ordres en parallèle, avec différents contextes.
-C'est le bot qui se  charge de sauver son état, et donc, les états des différentes librairies.
+C'est le bot qui se charge de sauver son état, et donc, les états des différentes librairies.
 Pour faire avance un générateur, 
 ```
 ctx.order_ctx = await anext(current_order)
@@ -127,7 +114,7 @@ D'autre part, lorsque le code redémarre, des messages peuvent également avoir 
 Dans ce cas, une approche en pooling est à privilégier. Un mixte est possible.
 Commencer par un pooling, puis en stream.
 Par exemple, attendre des messages, et en plus, régulièrement, faire du polling.
-Ainsi, le rebot réagit au plus vite, si possible. Sinon, sur timer.
+Ainsi, le bot réagit au plus vite, si possible. Sinon, sur timer.
 
 ## Sauvegarde des contextes
 Pour sauver les contextes, il faut utiliser les fonctions atomic_save_json() et atomic_load_json()
@@ -142,11 +129,6 @@ BINANCE_API_SECRET=...
 BINANCE_API_TEST=true
 ```
 Cela peut être valorisé dans un fichier `.env`
-
-# TODO
-- buy range oro (donner top/down du range, puis un %. Place un ordre ORO a x% au dessus et au dessous du range)
-- grid bot
-- smart buy, sell, ...
 
 # Service
 https://github.com/torfsen/python-systemd-tutorial
@@ -164,11 +146,19 @@ systemctl --user daemon-reload ; systemctl --user restart   auto-trading ; journ
 
 # Telegram
 https://www.geeksforgeeks.org/send-message-to-telegram-user-using-python/
+Lors du premier démarrage, récupérer le message venant de "Telegram" et saisir le code.
+
+# TODO
+- buy range oro (donner top/down du range, puis un %. Place un ordre ORO a x% au dessus et au dessous du range)
+- grid bot
+- smart buy, sell, ...
+
 
 ## Installation Raspberry PI
 - Création de l'image
 rpi-imager
-- ajouter un fichier ssh vide à la racine du boot
+- ajouter un fichier `ssh` vide à la racine du boot
+- Installer l'image dans le Raspberry, le démarrer et attendre la fin du boot
 
   
 - Connexion pour changement password (via une connexion Ethernet)
@@ -186,28 +176,58 @@ sudo reboot
 sudo apt-get update
 sudo apt-get install libffi-dev
   
-- Copie des fichiers
-sudo mkdir /usr/src/app  # Idem que sous Docker 
-sudo chown pi:pi /usr/src/app
-CTRL-D  
-rsync -av -e ssh --exclude='venv' * pi@192.168.0.71:/usr/src/app
-rcp .env pi@192.168.0.71:/usr/src/app
   
 ## Mise à jour de Python
 Voir [ici](https://angorange.com/raspberry-pi-installation-de-python-3-9-1)
 et en faire la version par défaut.
 
-# Instalation des dépendences
+sudo apt-get install -y build-essential tk-dev libncurses5-dev libncursesw5-dev libreadline6-dev libdb5.3-dev \
+  libgdbm-dev libsqlite3-dev libssl-dev libbz2-dev libexpat1-dev liblzma-dev zlib1g-dev libffi-dev tar wget
+
+PYTHON_VERSION=3.8.8
+wget https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz
+tar zxf Python-$PYTHON_VERSION.tgz
+cd Python-$PYTHON_VERSION
+sudo ./configure --enable-optimizations
+sudo make -j 4
+
+sudo make altinstall
+cd ..
+rm -r Python-$PYTHON_VERSION
+rm Python-$PYTHON_VERSION.tar.xz
+
+sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.7 0
+sudo update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python${PYTHON_VERSION:0:3} 0
+sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 0
+sudo update-alternatives --install /usr/bin/python python /usr/bin/python3 2
+python3 --version
+sudo ln -s /usr/share/pyshared/lsb_release.py /usr/local/lib/python${PYTHON_VERSION:0:3}/site-packages/lsb_release.py
+
+
+# Instalation du projet
+- Copie des fichiers
+```
+sudo mkdir /usr/src/app  # Idem que sous Docker 
+sudo chown pi:pi /usr/src/app
+CTRL-D  
+```
+```
+rsync -av -e ssh --exclude='venv' * .env .telegram pi@192.168.0.71:/usr/src/app
+```
+
+```
 ssh pi@192.168.0.71 "cd /usr/src/app && \
 python3 -m venv venv && \
 source venv/bin/activate && \
 sudo apt-get install libatlas-base-dev && \
 pip3 install -r requirements.txt"
-
+```
 - Vérifier le démarrage en local
+```
 ssh pi@192.168.0.71 "cd /usr/src/app && \
   source venv/bin/activate && \
   python3 auto_trading.py"
+```
 
 ## En faire un service
 ssh -p 8072 pi@88.124.108.99 "sudo ln -s /usr/src/app/auto_trading.service /etc/systemd/system && \
@@ -224,8 +244,11 @@ sudo systemctl stop  auto_trading
 - Activer au reboot
 sudo systemctl enable  auto_trading
 
+# Suivit
+sudo journalctl --unit=auto_trading -f
+
 ## Mise à jour
-rsync -av -e ssh --exclude='venv' * pi@192.168.0.71:/opt/auto_trading
+rsync -av -e ssh --exclude='venv' * .env .telegram pi@192.168.0.71:/usr/src/app
 
 # Notes
 Type d'ordres https://www.binance.com/en/support/articles/360033779452

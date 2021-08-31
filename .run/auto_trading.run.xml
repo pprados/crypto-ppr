@@ -34,15 +34,15 @@
     <option name="INPUT_FILE" value="" />
     <method v="2" />
   </configuration>
-  <configuration default="false" name="auto_trading" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="auto_trading test" type="PythonConfigurationType" factoryName="Python">
     <module name="crypto-ppr" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
     <envs>
       <env name="PYTHONUNBUFFERED" value="1 " />
-      <env name="NO_SAVE" value="true" />
+      <env name="SAVE" value="False" />
       <env name="CHECK_RESILIENCE" value="0" />
-      <env name="NO_TELEGRAM" value="True" />
+      <env name="TELEGRAM" value="False" />
       <env name="DEBUG" value="True" />
     </envs>
     <option name="SDK_HOME" value="" />

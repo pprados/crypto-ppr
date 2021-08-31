@@ -5,6 +5,7 @@ import os
 import secrets
 import sys
 import tracemalloc
+import time
 from asyncio import get_event_loop, sleep
 from decimal import getcontext, FloatOperation
 from pathlib import Path
@@ -22,6 +23,7 @@ from starlette.responses import JSONResponse, Response
 
 import global_flags
 from api_key import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TEST_NET, USER, PASSWORD
+from conf import RETRY_TIMEOUT
 from engine import Engine
 from request_json_comments import JsonCommentRoute
 
@@ -117,7 +119,7 @@ async def get_bot(id: str,
 def init(path: Optional[Path], simulate: bool):
     global engine_path
     global_flags.simulate = simulate
-    engine_path = path
+    engine_path = path if path else Path("ctx/engine.json")
     ctx = getcontext()
     ctx.prec = 8
     ctx.traps[FloatOperation] = True
@@ -159,12 +161,17 @@ def main(simulate: bool,
     # TODO: Voir http://www.uvicorn.org/#running-with-gunicorn
     # TODO: voir sync worker : https://docs.gunicorn.org/en/latest/design.html#sync-workers
     # pour simplifier le run
-    uvicorn.run(
-        app,
-        host="0.0.0.0", port=8000,
-        debug=True
-    )
-
+    while True:
+        try:
+            uvicorn.run(
+                app,
+                host="0.0.0.0", port=8000,
+                debug=True
+            )
+        except Exception as ex:
+            logging.error(ex)
+        logging.warning(f"Waiting {RETRY_TIMEOUT}s before retry to start")
+        time.sleep(RETRY_TIMEOUT)
 
 if __name__ == "__main__":
-    sys.exit(main())  # pylint: disable=no-value-for-parameter
+    sys.exit(main(standalone_mode=False))  # pylint: disable=no-value-for-parameter

@@ -16,7 +16,7 @@ import global_flags
 from TypingClient import TypingClient
 from api_key import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE
 from atomic_json import atomic_load_json, atomic_save_json
-from conf import MIN_RECONNECT_WAIT, SLIPPING_TIME, NO_TELEGRAM
+from conf import MIN_RECONNECT_WAIT, SLIPPING_TIME, TELEGRAM
 from events_queues import EventQueues
 from simulate_client import SimulateFixedValues
 from tools import generate_bot_id, log_wallet, _str_dump_order, remove_exponent
@@ -58,12 +58,12 @@ class Engine:
             logging.warning("Use the rollback version of conf.json")
         if not self.engine_conf:
             self.engine_conf = []  # Bot dans l'ordre inverse d'insertion
-        if not NO_TELEGRAM:
+        if TELEGRAM:
             self._telegram = TelegramClient('auto-trading', TELEGRAM_API_ID, TELEGRAM_API_HASH)
 
     async def init(self):
         """ Constructeur asynchrone """
-        if not NO_TELEGRAM:
+        if TELEGRAM:
             await self._init_telegram()
         loop = get_event_loop()
         self._engine_thread = loop.create_task(self.run())  # Démarre le thread pour le moteur
@@ -71,12 +71,12 @@ class Engine:
     async def _init_telegram(self):
         await self._telegram.connect()
         if not await self._telegram.is_user_authorized():
-            self._telegram.send_code_request(TELEGRAM_PHONE)
-            self._telegram.sign_in(TELEGRAM_PHONE, input('Enter the code: '))
+            await self._telegram.send_code_request(TELEGRAM_PHONE)
+            await self._telegram.sign_in(TELEGRAM_PHONE, input('Enter the code: '))
 
     async def send_telegram(self, log, message: str):
         log.warning(message)
-        if not NO_TELEGRAM:
+        if TELEGRAM:
             await self._telegram.send_message(TELEGRAM_PHONE, message)
 
     async def log_order(self, log, order: Dict[str, Any], prefix: str = "****** ", suffix: str = ''):
@@ -317,6 +317,12 @@ class Engine:
                 log.info(f"Sleep {MIN_RECONNECT_WAIT}s before restart...")
                 await sleep(MIN_RECONNECT_WAIT)
                 log.info("Try to restart")
+            except ConnectionError as ex:
+                if ex.__str__().startswith("Connection to Telegram failed"):
+                    pass # Ignore
+                else:
+                    log.exception(ex)  # FIXME: Connection to Telegram failed 5 time(s)
+                    raise
             except Exception as ex:
                 log.exception(ex)
                 raise

@@ -6,7 +6,7 @@ from typing import Any, Optional, Tuple
 
 import jstyleson as json
 
-from conf import NO_SAVE
+from conf import SAVE
 from tools import str_d
 
 
@@ -23,7 +23,7 @@ def _serialize(obj):
 
 
 def atomic_save_json(obj: Any, filename: Path, comment: Optional[str] = None) -> None:
-    if NO_SAVE:
+    if not SAVE:
         return
     old, _ = atomic_load_json(filename)
 

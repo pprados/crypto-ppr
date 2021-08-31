@@ -58,7 +58,7 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
     assert params.mode in [MARKET, LIMIT, COND_MARKET_ORDER, COND_LIMIT_ORDER], "Invalide 'mode'"
     params.cond_price = Decimal(str(conf["cond_price"])) if "cond_price" in conf else None
     params.price = Decimal(str(conf["price"])) if "price" in conf else None
-    assert params.mode not in [COND_MARKET_ORDER,COND_LIMIT_ORDER] or params.cond_price, "Set 'cond_price'"
+    assert params.mode not in [COND_MARKET_ORDER, COND_LIMIT_ORDER] or params.cond_price, "Set 'cond_price'"
     assert params.mode in (MARKET, COND_MARKET_ORDER) or params.price, "Set 'price'"
     params.trailing_buy = Decimal(conf['trailing'].strip('%')) / 100 if 'trailing' in conf else None
     assert not params.mode in (COND_LIMIT_ORDER, COND_MARKET_ORDER) or not params.trailing_buy

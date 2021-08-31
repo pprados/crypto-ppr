@@ -18,26 +18,26 @@
 
   // Pour le volume du trade, on peut indiquer le nb d'unité (unit),
   // ou un portion de l'ensemble du portefeuille sur la devise (size)
-  // ou un volum total de 'quote' (nb d'unité ajusté par le market)
+  // ou un volume total de 'quote' (nb d'unité ajusté par le market)
   //"unit": 1,      // nombre d'uniter à acheter
   //"size": "10%",  // taille par rapport à l'ensemble des quotes du portefeuille global
   "total": 20,      // Nombre de quote à utiliser (unité ajusté automatiquement suivant le prix d'achat)
 
   // Le mode d'achat peut êre au prix du marché,
   // a un cours limit à indiquer dans 'price'
-  // ou après un signal de prix indiqué dans 'price', alors un achat est demandé à "order_price"
+  // ou après un signal de prix indiqué dans 'cond_price', alors un achat est demandé à "price"
   "mode": "MARKET",       // "LIMIT", "MARKET", "COND_LIMIT_ORDER", "COND_MARKET_ORDER"
   // "cond_price": 1000   // Si mode=="COND_*" (pour ajouter un ordre)
   // "price": 34100,      // si mode != "MARKET" or "COND_MARKET_ORDER"
 
   // Il est possible d'apprendre du cours, pour acheter moins chère
-  // si le cours remonte de 'training_buy'. Mais on suit la chute
+  // si le cours remonte de 'training'. Mais on suit la chute
   "training": "0.05%", // "+3%" TODO ou "-3%" si le prix maximum d'achat est à la limite
 
   // Il est possible d'indiquer des règles de take profit (TP).
   "take_profit": {
     // Le signal d'activation est sur une 'base' au prix du marché ou sur une limite
-    "base": "bid",       // La base de déclanchement : *bid*, ask, last (TODO: securisé via pre-ordre)
+    "base": "bid",       // La base de déclenchement : *bid*, ask, last (TODO: securisé via pre-ordre)
     "mode": "MARKET",     // "MARKET" ou "LIMIT"
 
     // *"MARKET"* ou "LIMIT" ou un % par rapport au trigger.
