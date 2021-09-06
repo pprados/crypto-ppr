@@ -5,18 +5,19 @@ from decimal import Decimal
 from enum import Enum
 from importlib import import_module
 from pathlib import Path
+from random import randint
 from typing import Dict, List, Any, Optional, Set
 
 import sdnotify
-from aiohttp import ClientConnectorError
-from binance.exceptions import BinanceAPIException
+from aiohttp import ClientConnectorError, ClientError
 from telethon import TelegramClient
 
 import global_flags
 from TypingClient import TypingClient
 from api_key import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE
 from atomic_json import atomic_load_json, atomic_save_json
-from conf import MIN_RECONNECT_WAIT, SLIPPING_TIME, TELEGRAM
+from binance.exceptions import BinanceAPIException
+from conf import SLIPPING_TIME, TELEGRAM, MAX_RECONNECT_SECONDS
 from events_queues import EventQueues
 from simulate_client import SimulateFixedValues
 from tools import generate_bot_id, log_wallet, _str_dump_order, remove_exponent
@@ -83,7 +84,7 @@ class Engine:
         await self.send_telegram(log, _str_dump_order(order, prefix, suffix))
 
     async def log_result(self, log, wallet: Dict[str, Decimal], initial_wallet: Dict[str, Decimal]):
-        log_wallet(log,wallet,"Wallet:")
+        log_wallet(log, wallet, "Wallet:")
         diff = [f"{k}:{remove_exponent(v - initial_wallet[k]):+}" for k, v in wallet.items()]
         message = f"###### Result: {', '.join(diff)}"
         await self.send_telegram(log, message)
@@ -107,6 +108,7 @@ class Engine:
             self.api_key,
             self.api_secret, testnet=self.test_net,
         )
+
         if self.simulate:
             # client = await SimulateClient.create(api_key, api_secret, testnet=test_net)
             # client = await SimulateRandomValues("BTCUSDT",min=33000,max=35000,step=10)
@@ -234,16 +236,19 @@ class Engine:
         log = self.log
         log.info("Start auto_trading")
         await self.send_telegram(log, "Auto-trading started")
-
+        attempts_reconnect = 0
         n = sdnotify.SystemdNotifier()
         n.notify("READY=1")  # Informe SystemD
-
+        self.event_queues = None
+        client = None
+        last_err_msg = None
         while True:
             self.bots: Set[Task] = set()
-            client = None
             try:
 
                 client = await self._init_client()  # Reset client
+                # Regroupement de tous les évenments binance dans une queue unique, broadcasté vers les queues des bots
+                self.event_queues = EventQueues(client)
 
                 # Création des agents à partir de conf.json.
 
@@ -256,8 +261,6 @@ class Engine:
                 full_wallet = {x['asset']: x['free'] for x in self.client_account['balances']}
                 log_wallet(log, full_wallet)
 
-                # Regroupement de tous les évenments binance dans une queue unique, broadcasté vers les queues des bots
-                self.event_queues = EventQueues(client)
                 # FXIME: rendre la liste dynamique
                 self.event_queues.add_streams(
                     [
@@ -279,6 +282,7 @@ class Engine:
                     await self.recreate_bot(id, conf)
 
                 # Boucle d'avancement des bots, et de gestion des messages de l'API
+                last_err_msg = None
                 while True:
                     if self.bots:
                         finished, unfinished = await wait(self.bots,
@@ -301,28 +305,37 @@ class Engine:
             except (BinanceAPIException, ClientConnectorError, TimeoutError) as ex:
                 # FIXME: Bug en cas de perte totale du réseau, sur la résolution DNS
                 # Wait and retry
-                if isinstance(ex, BinanceAPIException) and ex.code == 0 \
-                        and ex.message.startswith('Invalid JSON error message from Binance'):
-                    log.error(ex.message)
+                # if isinstance(ex, BinanceAPIException) and ex.code == 0 \
+                #         and ex.message.startswith('Invalid JSON error message from Binance'):
+                #     log.error(ex.message)
                 ex_msg = str(ex)
+
                 if not ex_msg or ex_msg == 'None':
                     ex_msg = ex.__class__.__name__
-                log.error(f"Binance communication error ({ex_msg})")
+                if ex_msg != last_err_msg:
+                    log.warning(f"Binance communication error ({ex_msg})")
+                    last_err_msg = ex_msg
                 # Informe tous les bots
-                self.event_queues.broadcast_msg(
-                    {
-                        "stream": "@bot",
-                        "e": "kill"
-                    })
-                log.info(f"Sleep {MIN_RECONNECT_WAIT}s before restart...")
-                await sleep(MIN_RECONNECT_WAIT)
-                log.info("Try to restart")
+                if self.event_queues:
+                    self.event_queues.broadcast_msg(
+                        {
+                            "stream": "@bot",
+                            "e": "kill"
+                        })
+                random_wait = randint(1, min(MAX_RECONNECT_SECONDS, 2 ** attempts_reconnect))
+                attempts_reconnect += 1
+                log.info(f"Try to restart the connection (after {random_wait}s)")
+                await sleep(random_wait)
+                log.info(f"Restart ...")
             except ConnectionError as ex:
                 if ex.__str__().startswith("Connection to Telegram failed"):
-                    pass # Ignore
+                    pass  # Ignore
                 else:
                     log.exception(ex)  # FIXME: Connection to Telegram failed 5 time(s)
                     raise
+            except ClientError as ex:
+                log.exception(ex)  # Max reconnect retries reached
+                raise
             except Exception as ex:
                 log.exception(ex)
                 raise
@@ -334,5 +347,7 @@ class Engine:
                 if client:
                     await client.close_connection()
                     client = None
+                if self.event_queues:
+                    await self.event_queues.close()
             if global_flags.simulate:
                 break

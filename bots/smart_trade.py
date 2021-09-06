@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Tuple, List
 
 import aiohttp
-from aiohttp import ClientConnectorError
+from aiohttp import ClientConnectorError, ClientError
 from binance import AsyncClient
 from binance.enums import SIDE_SELL, SIDE_BUY, TIME_IN_FORCE_GTC, ORDER_STATUS_NEW, \
     ORDER_TYPE_TAKE_PROFIT_LIMIT, ORDER_TYPE_STOP_LOSS_LIMIT
@@ -104,7 +104,7 @@ class SmartTrade(BotGenerator):
             if 'e' in msg and msg['e'] == "error":
                 # Web socket in error
                 log.error("Web socket for market in error")
-                raise ValueError("Msg error")  # TODO
+                raise ClientError(msg['m'])
 
         async def trailing_buy(msg: Dict[str, Any]) -> None:
             if msg["_stream"].endswith("@trade") and \
@@ -900,7 +900,7 @@ class SmartTrade(BotGenerator):
                 yield self
 
 
-        except (ClientConnectorError, asyncio.TimeoutError, aiohttp.ClientOSError) as ex:
+        except (ClientError,ClientConnectorError, asyncio.TimeoutError, aiohttp.ClientOSError) as ex:
             # Attention, pas de sauvegarde.
             raise ex
 

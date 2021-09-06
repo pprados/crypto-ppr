@@ -137,11 +137,11 @@ sudo apt-get install -y python3-sdnotify
 systemctl --user start    auto-trading
 systemctl --user status   auto-trading
 systemctl --user stop     auto-trading
-systemctl --user restart  auto-trading
+systemctl --user _restart  auto-trading
 journalctl --user-unit    auto-trading
 systemctl --user daemon-reload
 
-systemctl --user daemon-reload ; systemctl --user restart   auto-trading ; journalctl --user-unit    auto-trading
+systemctl --user daemon-reload ; systemctl --user _restart   auto-trading ; journalctl --user-unit    auto-trading
 
 
 # Telegram

@@ -11,10 +11,10 @@
   // - "short" : Vend, attend la descente, et achete (Soit par emprun de token, soit en future). Attention liquidation.
   //             Les paramètres restent les mêmes, comme dans un long, mais les valeurs sont "inversées".
   //             Par exemple, un TP de +10% est compris en "une baisse" de 10%
-  "mode": "long" // TODO
+  "type": "long", // TODO
   // Ajoute si possible un effet de levier (emprunte des tokens, mais les pertes sont multipliées par le levier)
   // Pour un levier de x2, une perte par token de 5% est équivalente à une baisse de 10% sur le trade.
-  "level": 0 // TODO
+  "level": 0, // TODO
 
   // Pour le volume du trade, on peut indiquer le nb d'unité (unit),
   // ou un portion de l'ensemble du portefeuille sur la devise (size)
@@ -32,7 +32,7 @@
 
   // Il est possible d'apprendre du cours, pour acheter moins chère
   // si le cours remonte de 'training'. Mais on suit la chute
-  "training": "0.05%", // "+3%" TODO ou "-3%" si le prix maximum d'achat est à la limite
+  "training": "2%", // "+3%" TODO ou "-3%" si le prix maximum d'achat est à la limite
 
   // Il est possible d'indiquer des règles de take profit (TP).
   "take_profit": {
@@ -44,7 +44,7 @@
     // Lorsque l'on vend pour un TP, ordre au MARKET ou LIMIT sur le trigger * percent
     // Généralement negatif.
     "mode_sell": "-0.5%", // Ajoute une ordre à -0.5% du trigger (évite un ordre market)
-    "sell_timeout": 5,    // Délais accordé pour un ordre limite, sinon, repasse en MARKET
+    "sell_timeout": 60,    // Délais accordé pour un ordre limite, sinon, repasse en MARKET
 
     // La cible du profit
     // - en valeur (100.0: déclenche à la valeur de 100.0 quote)
@@ -59,7 +59,7 @@
     // Take profit minimum, si le cours remonte pendant 'timeout', alors le SL est remplacé par ce niveau de TP
     "minimal" : "2%",
     // Délai pour confirmer l'activation d'un MTP en seconde
-    "timeout": 2,
+    "timeout": 600,
   },
 
   // Il est possible d'indiquer des règles de stop loss (SL).
@@ -74,7 +74,7 @@
     // Lorsque l'on vend pour un TP, ordre au MARKET ou limit sur le trigger * percent ?
     // Généralement negatif.
     "mode_sell": "-0.5%",
-    "sell_timeout": 5,      // Délais accordé pour un ordre limite, sinon, repasse en MARKET
+    "sell_timeout": 60,      // Délais accordé pour un ordre limite, sinon, repasse en MARKET
 
     // Le declenchement du stop-loss en valeur, % ou perte
     // 100.0: vend à 100.0
@@ -84,7 +84,7 @@
 
     // Le signal d'une baisse peut etre confirmé pendant un certain délai en seconde.
     // Le signal ne doit pas remonter pendant cette période.
-    "timeout": 60,
+    "timeout": 120,
 
     // Il es possible d'apprendre de la baisse pour remontrer progressivement le SL
     // au fur et à mesure de la monté du cours.

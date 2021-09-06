@@ -23,7 +23,6 @@ from starlette.responses import JSONResponse, Response
 
 import global_flags
 from api_key import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TEST_NET, USER, PASSWORD
-from conf import RETRY_TIMEOUT
 from engine import Engine
 from request_json_comments import JsonCommentRoute
 
@@ -129,7 +128,7 @@ def init(path: Optional[Path], simulate: bool):
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
-    logging.getLogger("binance.streams").setLevel(logging.INFO)
+    # logging.getLogger("binance.streams").setLevel(logging.INFO)
     logging.getLogger("asyncio").setLevel(logging.INFO)
     logging.getLogger("websockets").setLevel(logging.INFO)
 
@@ -160,18 +159,11 @@ def main(simulate: bool,
     init(path, simulate)
     # TODO: Voir http://www.uvicorn.org/#running-with-gunicorn
     # TODO: voir sync worker : https://docs.gunicorn.org/en/latest/design.html#sync-workers
-    # pour simplifier le run
-    while True:
-        try:
-            uvicorn.run(
-                app,
-                host="0.0.0.0", port=8000,
-                debug=True
-            )
-        except Exception as ex:
-            logging.error(ex)
-        logging.warning(f"Waiting {RETRY_TIMEOUT}s before retry to start")
-        time.sleep(RETRY_TIMEOUT)
+    uvicorn.run(
+        app,
+        host="0.0.0.0", port=8000,
+        debug=True
+    )
 
 if __name__ == "__main__":
     sys.exit(main(standalone_mode=False))  # pylint: disable=no-value-for-parameter

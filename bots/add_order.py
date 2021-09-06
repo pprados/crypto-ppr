@@ -6,11 +6,12 @@ L'état order_ctx.state fini par etre STATE_ERROR ou STATE_ORDER_FILLED.
 import asyncio
 import logging
 from asyncio import Queue, wait_for
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from queue import Empty
 from random import randint
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from binance.enums import ORDER_STATUS_FILLED, ORDER_STATUS_NEW, ORDER_STATUS_REJECTED, ORDER_STATUS_EXPIRED, \
     ORDER_STATUS_PARTIALLY_FILLED, ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT_MAKER, ORDER_TYPE_STOP_LOSS, ORDER_TYPE_LIMIT, \
@@ -33,6 +34,15 @@ from simulate_client import EndOfDatas
 from tools import update_wallet, get_order_price, log_add_order, anext, log_wallet, generate_order_id, \
     wallet_from_symbol, remove_exponent
 
+@dataclass(init=False)  # TODO: utiliser ceci ?
+class AddOrderParameters:
+    symbol: str
+    side:str
+    type:str
+    price:Decimal
+    timeInForce:str
+    quantity:Optional[Decimal]
+    quoteOrderQty:Optional[Decimal]
 
 class AddOrder(BotGenerator):
     POOLING_SLEEP = 2
