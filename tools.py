@@ -125,8 +125,8 @@ def update_order(wsi: Dict[str, Any], current_price: Optional[Decimal], order: D
         if quantity > wsi.lot.maxQty:
             quantity = wsi.lot.maxQty
 
-        if (quantity - wsi.lot.minQty) % wsi.lot.stepSize != 0:
-            quantity = quantity - ((Decimal(quantity) - wsi.lot.minQty) % wsi.lot.stepSize)
+        if (quantity - wsi.lot.minQty) % (wsi.lot.stepSize) != 0:
+            quantity = quantity - (Decimal(quantity) % (wsi.lot.stepSize))
 
         # MIN_NOTIONAL (https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md#min_notional)
         # notional is price * quantity
@@ -146,7 +146,7 @@ def update_order(wsi: Dict[str, Any], current_price: Optional[Decimal], order: D
                 raise ValueError("Impossible to update the quantity")
         if 'quantity' not in order:
             assert ("BUG")
-        order['quantity'] = quantity  # round_step_size(quantity, wsi.lot.stepSize)
+        order['quantity'] = remove_exponent(quantity)  # round_step_size(quantity, wsi.lot.stepSize)
     if "price" in order:
         order["price"] = remove_exponent(price)
     if "stopPrice" in order:

@@ -1,7 +1,7 @@
 // Paramètres d'un Smart Trade
 {
   // Le nom du bot à utiliser
-  "bot": "smart_trade", // (Optionnel)
+  "bot": "smart_trade",
 
   // La pair à utiliser (par défaut, achete la base avec la quote - achette du BTC avec de l'USDT)
   "symbol": "BTCUSDT",

@@ -420,9 +420,15 @@ class SmartTrade(BotGenerator):
                         quantity = params.unit  # TODO: unit ou quote ?
                         order["quantity"] = quantity
                     elif params.size:
-                        order["quoteOrderQty"] = self.wallet[quote] * params.size
+                        if params.mode == "LIMIT":
+                            order["quantity"]= (self.wallet[quote] * params.size) / params.price
+                        else:
+                            order["quoteOrderQty"] = self.wallet[quote] * params.size
                     elif params.total:
-                        order["quoteOrderQty"] = params.total
+                        if params.mode == "LIMIT":
+                            order["quantity"] = params.total / params.price
+                        else:
+                            order["quoteOrderQty"] = params.total
 
                     if params.trailing_buy or params.mode in [MARKET, COND_MARKET_ORDER]:
                         order["type"] = ORDER_TYPE_MARKET
