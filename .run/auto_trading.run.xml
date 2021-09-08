@@ -43,7 +43,7 @@
       <env name="SAVE" value="False" />
       <env name="CHECK_RESILIENCE" value="0" />
       <env name="TELEGRAM" value="False" />
-      <env name="DEBUG" value="True" />
+      <env name="DEBUG" value="False" />
     </envs>
     <option name="SDK_HOME" value="" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />

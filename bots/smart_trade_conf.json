@@ -60,6 +60,7 @@
     "minimal" : "2%",
     // Délai pour confirmer l'activation d'un MTP en seconde
     "timeout": 600,
+    "minimal_trailing": true
   },
 
   // Il est possible d'indiquer des règles de stop loss (SL).

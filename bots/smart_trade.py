@@ -9,14 +9,14 @@ from typing import Tuple, List
 
 import aiohttp
 from aiohttp import ClientConnectorError, ClientError
-from binance import AsyncClient
-from binance.enums import SIDE_SELL, SIDE_BUY, TIME_IN_FORCE_GTC, ORDER_STATUS_NEW, \
-    ORDER_TYPE_TAKE_PROFIT_LIMIT, ORDER_TYPE_STOP_LOSS_LIMIT
-from binance.exceptions import BinanceAPIException
 
 import global_flags
 from TypingClient import TypingClient
 from atomic_json import atomic_load_json, atomic_save_json
+from binance import AsyncClient
+from binance.enums import SIDE_SELL, SIDE_BUY, TIME_IN_FORCE_GTC, ORDER_STATUS_NEW, \
+    ORDER_TYPE_TAKE_PROFIT_LIMIT, ORDER_TYPE_STOP_LOSS_LIMIT
+from binance.exceptions import BinanceAPIException
 from bot_generator import BotGenerator
 from conf import EMPTY_PENDING
 from shared_time import sleep_speed, get_now
@@ -77,7 +77,7 @@ class SmartTrade(BotGenerator):
         else:
             stat.append(("TP", self.active_take_profit_condition, "TP"))
 
-        if self.params.minimal and 'activate_min_tp' in self:
+        if self.params.take_profit_minimal and 'activate_min_tp' in self:
             stat.append(("MTP", self.mtp_start_delay, "TP"))
 
         if self.buy_order:
@@ -176,9 +176,12 @@ class SmartTrade(BotGenerator):
                         new_stop_loss_condition = (trigger_price * (1 + self.stop_loss_percent))
                         if new_stop_loss_condition > self.active_stop_loss_condition:
                             self.active_stop_loss_condition = new_stop_loss_condition
-                            log.info(
+                            log.debug(
                                 f"Update TSL trigger condition to {remove_exponent(self.active_stop_loss_condition):+} "
                                 f"(current={remove_exponent(trigger_price):+})")
+                            if not self.tsl_sup and self.active_stop_loss_condition > self.price:
+                                log.warning(f"TSL > buy price {remove_exponent(self.price):+} {sbase}")
+                                self.tsl_sup = True
 
         async def tp_trailing(msg: Dict[str, Any]) -> None:
             trigger_price = None
@@ -223,7 +226,7 @@ class SmartTrade(BotGenerator):
                     self.state = SmartTrade.STATE_ACTIVATE_TAKE_PROFIT
 
                 # Gestion du minimal TP
-                if params.minimal:
+                if params.take_profit_minimal:
                     if self.mtp_triggered:
                         log.debug(f"{trigger_price=} {self.mtp_target=}")
                     if not self.mtp_activated and self.mtp_triggered and trigger_price < self.mtp_target:
@@ -240,13 +243,22 @@ class SmartTrade(BotGenerator):
                         now = get_now()
                         if self.mtp_start_delay:
                             # le timer est actif
-                            if self.mtp_start_delay + params.minimal_timeout < now:
+                            if self.mtp_start_delay + params.take_profit_minimal_timeout < now:
                                 # et je dépasse le délai, donc j'active
                                 self.mtp_triggered = True
                                 await engine.send_telegram(
                                     log,
                                     f"MTP activated, greater than {self.mtp_target:+} {squote} "
-                                    f"for {params.minimal_timeout}s")
+                                    f"for {params.take_profit_minimal_timeout}s")
+                                if params.take_profit_trailing_minimal:
+                                    self.mtp_target = (self.mtp_target * (1 + params.take_profit_minimal)).normalize()
+                                    self.mtp_triggered = False
+                                    self.mtp_start_delay = None
+                                    await engine.send_telegram(
+                                        log,
+                                        f"MTP ajusted to {self.mtp_target:+} {squote} "
+                                        f"for {params.take_profit_minimal_timeout}s")
+
                         else:
                             # On active le timer
                             self.mtp_start_delay = now
@@ -269,9 +281,13 @@ class SmartTrade(BotGenerator):
                     "activate_trailing_buy": False,
                     "activate_trailing_take_profit": False,
                     "activate_trailing_stop_loss": False,
+                    "activate_trailing_minimal_take_profit": False,
+                    "tsl_sup": False,
+                    "take_profit_minimal": Decimal("0"),
                 }
             else:
                 pass  # Reprise
+                self.tsl_sup = False  # FIXME: pour update à chaud
             self.update(init)
             del init
 
@@ -309,9 +325,9 @@ class SmartTrade(BotGenerator):
                 # Premier démarrage
                 log.info(f"Started")
             else:
-                # Reset les sous generateur
+                # Reset tout les generateurs
                 if 'buy_order' in self and self.buy_order:
-                    self.buy_order = await AddOrder.create(client,
+                    self.buy_order:Dict[str,Any] = await AddOrder.create(client,
                                                            engine,
                                                            queue,
                                                            log,
@@ -320,7 +336,7 @@ class SmartTrade(BotGenerator):
                                                            )
 
                 if 'take_profit_order' in self and self.take_profit_order:
-                    self.take_profit_order = await AddOrder.create(client,
+                    self.take_profit_order:Dict[str,Any] = await AddOrder.create(client,
                                                                    engine,
                                                                    queue,
                                                                    log,
@@ -329,7 +345,7 @@ class SmartTrade(BotGenerator):
                                                                    )
 
                 if 'stop_loss_order' in self and self.stop_loss_order:
-                    self.stop_loss_order = await AddOrder.create(client,
+                    self.stop_loss_order:Dict[str,Any] = await AddOrder.create(client,
                                                                  engine,
                                                                  queue,
                                                                  log,
@@ -421,7 +437,7 @@ class SmartTrade(BotGenerator):
                         order["quantity"] = quantity
                     elif params.size:
                         if params.mode == "LIMIT":
-                            order["quantity"]= (self.wallet[quote] * params.size) / params.price
+                            order["quantity"] = (self.wallet[quote] * params.size) / params.price
                         else:
                             order["quoteOrderQty"] = self.wallet[quote] * params.size
                     elif params.total:
@@ -506,17 +522,17 @@ class SmartTrade(BotGenerator):
 
                         if params.use_take_profit:
                             self.high_price = self.buy_order.price
-                            if params.minimal:
-                                self.mtp_target = (self.buy_order.price * (1 + params.minimal)).normalize()
+                            if params.take_profit_minimal:
+                                self.mtp_target = (self.buy_order.price * (1 + params.take_profit_minimal)).normalize()
                                 self.mtp_triggered = False
                                 self.mtp_activated = False
                                 self.mtp_start_delay = None
                                 log.info(
                                     f"Set MTP trigger condition to "
-                                    f"{self.mtp_target:+} {squote} ({remove_exponent(params.minimal * 100):+}% /"
+                                    f"{self.mtp_target:+} {squote} ({remove_exponent(params.take_profit_minimal * 100):+}% /"
                                     f" {params.take_profit_base})")
                             if not params.take_profit_trailing \
-                                    and not params.minimal \
+                                    and not params.take_profit_minimal \
                                     and not params.use_stop_loss \
                                     and params.take_profit_base == "last":  # TODO: si params.take_profit_base != "last", à la bots_engine
                                 # TP sans SL ni trailing, sur une base 'last'
@@ -713,7 +729,8 @@ class SmartTrade(BotGenerator):
                         self._set_state_error()
                     elif self.stop_loss_order.is_filled():
                         if "origQty" in self.stop_loss_order.order and \
-                                Decimal(self.stop_loss_order.order["origQty"]) != Decimal(self.stop_loss_order.quantity):
+                                Decimal(self.stop_loss_order.order["origQty"]) != Decimal(
+                            self.stop_loss_order.quantity):
                             log.info("Partially sell")
                         self.state = SmartTrade.STATE_FINISH  # TODO: autres erreurs
                     elif self.stop_loss_order.order['type'] == ORDER_TYPE_LIMIT and \
@@ -906,7 +923,7 @@ class SmartTrade(BotGenerator):
                 yield self
 
 
-        except (ClientError,ClientConnectorError, asyncio.TimeoutError, aiohttp.ClientOSError) as ex:
+        except (ClientError, ClientConnectorError, asyncio.TimeoutError, aiohttp.ClientOSError) as ex:
             # Attention, pas de sauvegarde.
             raise ex
 

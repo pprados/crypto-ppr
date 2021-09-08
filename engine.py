@@ -267,7 +267,7 @@ class Engine:
                         # "btcusdt@aggTrade",
                         "btcusdt@trade",  # FIXME: rendre paramétrable
                         "btcusdt@bookTicker",
-                        # "ethusdt@trade",
+                        "ethbusd@trade",
                         # "ethusdt@bookTicker",
                     ])
                 self.client = client  # Commit the initialization

@@ -171,15 +171,14 @@ class AddOrder(BotGenerator):
                     order = self.partially_order if self.partially_order else self.order
                     await client.create_test_order(**order)
                     # Puis essaye de l'executer
-                    log.debug(f"Push   {order}")
                     self.new_order = await client.create_order(**order)
-                    log.debug(f"Pushed {self.new_order}")
                     if self.new_order["status"] == ORDER_STATUS_FILLED:
                         update_wallet(wallet, self.new_order)
                         await engine.log_order(log, self.new_order, prefix + " ****** ")
                         self.order = self.new_order
                         self.state = AddOrder.STATE_ORDER_FILLED
                 except BinanceAPIException as ex:
+                    log.error(ex.message)
                     if ex.code == -2010:  # Duplicate order sent ?, ignore
                         if ex.message == "Duplicate order sent.":
                             # Retrouve l'ordre dupliqué.
@@ -207,6 +206,9 @@ class AddOrder(BotGenerator):
                         elif ex.message == "Stop price would trigger immediately.":
                             # https://dev.binance.vision/t/order-would-trigger-immediately-error/245/2
                             raise
+                    elif ex.code == -1021:
+                        # Timestamp for this request is outside of the recvWindow
+                        raise
                     else:
                         raise
                 if self.new_order["status"] != ORDER_STATUS_FILLED:

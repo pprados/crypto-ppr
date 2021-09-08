@@ -10,8 +10,8 @@ After=network.target
 Environment="HOME_AUTO_TRADE=/usr/src/app"
 Environment="PATH=/usr/src/app/venv/bin:/usr/bin:/bin"
 Environment=PYTHONUNBUFFERED=true
-Environment=TELEGRAM=False
-Environment=DEBUG=True
+Environment=TELEGRAM=True
+Environment=DEBUG=False
 User=pi
 
 # Démarrage

@@ -248,7 +248,8 @@ sudo systemctl enable  auto_trading
 sudo journalctl --unit=auto_trading -f
 
 ## Mise à jour
-rsync -av -e ssh --exclude='venv' * .env .telegram pi@192.168.0.71:/usr/src/app
+# rsync -av -e ssh --exclude='venv' * .env .telegram pi@192.168.0.71:/usr/src/app
+rsync -av -e ssh --exclude='venv' * .telegram pi@192.168.0.71:/usr/src/app
 
 # Notes
 Type d'ordres https://www.binance.com/en/support/articles/360033779452

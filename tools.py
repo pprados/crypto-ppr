@@ -322,8 +322,8 @@ def _str_dump_order(order: Dict[str, Any], prefix: str, suffix: str = '') -> str
     if quantity and str_price != "MARKET":
         return f"{prefix}{side} {str_d(quantity)} {stoken} at {str_price} {sother}{pre_suffix}{suffix}"
     elif str_price == "MARKET":
+        calculate_price = Decimal(order['cummulativeQuoteQty']) / Decimal(order['executedQty'])
         if 'cummulativeQuoteQty' in order:
-            calculate_price = Decimal(order['cummulativeQuoteQty']) / Decimal(order['executedQty'])
             return f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {stoken} at {calculate_price} {sother}" \
                    f" for {quantity * calculate_price} {sother}" \
                    f" {pre_suffix}{suffix}"
@@ -331,12 +331,15 @@ def _str_dump_order(order: Dict[str, Any], prefix: str, suffix: str = '') -> str
             if 'quoteOrderQty' in order:
                 return f"{ts_to_str(get_now())}: {prefix}{side} {stoken} for {order['quoteOrderQty']} {sother}" \
                        f" at MARKET" \
+                       f" for {quantity * calculate_price} {sother}" \
                        f" {pre_suffix}{suffix}"
             else:
                 return f"{ts_to_str(get_now())}: {prefix}{side} {str_d(quantity)} {stoken} at MARKET" \
+                       f" for {quantity * calculate_price} {sother}" \
                        f" {pre_suffix}{suffix}"
     elif quote_order_qty:
-        return f"{prefix}{side} {stoken} for {str_d(quote_order_qty)} {sother} at MARKET" \
+        return f"{prefix}{side} {stoken} " \
+               f"for {str_d(quote_order_qty)} {sother} at MARKET" \
                f" {pre_suffix}{suffix}"
 
 
@@ -350,7 +353,7 @@ def log_add_order(log: logging, order: Dict[str, Any], prefix=None):
 
 
 def log_wallet(log: logging, wallet: Wallet, prefix="wallet:") -> None:
-    log.info(prefix + " ".join([f"{k}:{v:+}" for k, v in wallet.items()]))
+    log.info(prefix + " ".join([f"{k}:{v:+}" for k, v in wallet.items() if v]))
 
 
 def update_wallet(wallet: Dict[str, Decimal], order: Dict[str, Any]) -> None:

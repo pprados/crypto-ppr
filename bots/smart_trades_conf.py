@@ -28,16 +28,18 @@ class SmartTradeParameters:
     price: Optional[Decimal]
     trailing_buy: Optional[Decimal]
 
-    use_take_profit: Optional[bool]
+    use_take_profit: bool
     take_profit_base: Optional[str]
     take_profit_mode: Optional[str]
     take_profit_mode_sell:Optional[Decimal]
     take_profile_sell_timeout:Optional[int]
     take_profile_price:Optional[Decimal]
+    take_profit_trailing: bool
     take_profit_minimal: Optional[Decimal]
-    take_profit_timeout: Optional[int]
+    take_profit_minimal_timeout: Optional[int]
+    take_profit_trailing_minimal: bool
 
-    use_stop_loss: Optional[bool]
+    use_stop_loss: bool
     stop_loss_base: Optional[str]
     stop_loss_mode: Optional[str]  # "MARKET" "COND_LIMIT_ORDER"
     stop_loss_mode_sell: Optional[Decimal]
@@ -57,6 +59,10 @@ def _time_to_second(val:Union[str,int]):
 
 def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
     params = SmartTradeParameters()
+
+    # Default values
+    params.use_take_profit=False
+    params.use_take_profit=False
 
     params.symbol = conf["symbol"]
     params.unit = Decimal(str(conf["unit"])) if "unit" in conf else None
@@ -108,11 +114,12 @@ def parse_conf(conf: Dict[str, Any]) -> SmartTradeParameters:
                                                                                                 in take_profit_conf else None
         assert not params.trailing_buy or params.take_profit_limit_percent or params.take_profit_limit
 
-        params.minimal = Decimal(take_profit_conf['minimal'].strip('%')) / 100 \
+        params.take_profit_minimal = Decimal(take_profit_conf['minimal'].strip('%')) / 100 \
             if 'minimal' in take_profit_conf else None
-        assert not params.minimal or params.minimal > 0
-        if params.minimal:
-            params.minimal_timeout = _time_to_second(take_profit_conf['timeout'])
+        assert not params.take_profit_minimal or params.take_profit_minimal > 0
+        if params.take_profit_minimal:
+            params.take_profit_minimal_timeout = _time_to_second(take_profit_conf['timeout'])
+            params.take_profit_trailing_minimal = take_profit_conf.get("minimal_trailing")
         params.mtp_trailing = take_profit_conf.get('trailing_minimal')
 
     # STOP LOST
