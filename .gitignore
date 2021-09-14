@@ -4,3 +4,6 @@ ctx/
 .telegram
 *.session
 *.session-journal
+__pycache__/
+venv/
+tests/caches/
